@@ -29,7 +29,7 @@ Ordered, applied first (cheap, high-precision). The built-in set is **additive-o
 - Azure: storage/connection-string secret shapes
 - OpenAI / Anthropic: `sk-[A-Za-z0-9]{20,}`, `sk-ant-[A-Za-z0-9\-]{20,}`
 - GitHub: `gh[posru]_[A-Za-z0-9]{36,}`
-- Slack: `xox[baprs]-[A-Za-z0-9-]{10,}`
+- Slack: `xox[baprs]-[A-Za-z0-9-]{10,}`; incoming-webhook URLs `hooks.slack.com/services/<team>/<channel>/<token>` (the triple is the secret span — added after an adversarial pass showed its `/`-segments individually duck the entropy bar)
 - Stripe: `[sr]k_live_[A-Za-z0-9]{24,}`
 - Google OAuth: `ya29\.[0-9A-Za-z\-_]+`
 

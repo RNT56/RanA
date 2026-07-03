@@ -287,6 +287,27 @@ func verifySession(db *sql.DB, session string, segs []segmentRow, cks []checkpoi
 			}
 		}
 
+		// Gap honesty (check 5, half 2): the header's gap_summary is a
+		// counts-by-reason tally of the `gap` events actually present in the
+		// segment. It is part of the hashed header (seg_hash), so on a
+		// SIGNED segment the checkpoint signature already protects it — but
+		// the UNATTESTED TAIL (segments sealed since the last checkpoint) is
+		// not yet signed, so a raw-sqlite attacker with no device key could
+		// otherwise zero a segment's gap_summary and recompute a
+		// self-consistent seg_hash, silently suppressing a recorded loss
+		// (violating P5). Cross-checking the header tally against the gap
+		// events decoded from the segment's own merkle-protected bytes makes
+		// that inconsistency loud: a header claiming fewer (or different)
+		// gaps than its events contain is tamper, on every segment, tail or
+		// not.
+		gotGaps, gErr := gapCountsFromEvents(evs)
+		if gErr != nil {
+			findings = append(findings, Finding{Kind: FindingNonCanonical, Session: session, Seg: sr.Seg, Detail: "gap event failed to decode for gap-summary cross-check"})
+		} else if !gapCountsEqual(gotGaps, sr.GapSummary) {
+			findings = append(findings, Finding{Kind: FindingGapDishonest, Session: session, Seg: sr.Seg,
+				Detail: fmt.Sprintf("header gap_summary %v does not match the %d gap event(s) in the segment (%v)", sr.GapSummary, gapTotal(gotGaps), gotGaps)})
+		}
+
 		leaves := make([][32]byte, 0, len(evs))
 		for _, encBytes := range evs {
 			ok, err := cborcanon.IsCanonical(encBytes)

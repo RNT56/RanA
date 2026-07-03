@@ -20,3 +20,8 @@ internal/ui/node_modules/
 
 # Local scratch
 /spikes/local/
+
+# stray root build outputs (use bin/ via make build)
+/rana
+/ranad
+/rana-verify-standalone

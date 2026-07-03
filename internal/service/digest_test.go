@@ -166,6 +166,58 @@ func TestDigestWorker_UnchangedFileEmitsNothing(t *testing.T) {
 	}
 }
 
+// TestDigestWorker_OversizedFileSkippedNotBuffered guards against an
+// unbounded-memory read: a file over maxDigestBytes must never be handed
+// to the hasher whole (an adversarial or merely huge agent-workspace file
+// must not force this long-lived worker to buffer it), and scanning it
+// must not panic or emit an fs.settle for it. A sparse file (Truncate,
+// not actual writes) keeps the test fast while still exercising the real
+// stat-size code path.
+func TestDigestWorker_OversizedFileSkippedNotBuffered(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "huge.bin")
+	f, err := os.Create(filePath)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := f.Truncate(maxDigestBytes + 1); err != nil {
+		f.Close()
+		t.Fatalf("Truncate: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	fc := newFakeClock(time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC))
+	events := make(chan schema.Event, 8)
+
+	w, err := NewDigestWorker(DigestWorkerConfig{
+		Scopes:   []string{filepath.Join(dir, "**")},
+		Session:  "s",
+		Pipeline: testPipeline(t),
+		Clock:    fc,
+		Emit: func(ev schema.Event) error {
+			events <- ev
+			return nil
+		},
+		DebounceInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewDigestWorker: %v", err)
+	}
+
+	w.ScanOnce(fc.Now())
+	fc.Advance(20 * time.Millisecond)
+	w.ScanOnce(fc.Now())
+
+	select {
+	case ev := <-events:
+		t.Fatalf("oversized file produced a settle event: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+		// expected: skipped silently, no digest attempted
+	}
+}
+
 func TestDigestWorker_ExcludedPathNeverScanned(t *testing.T) {
 	dir := t.TempDir()
 	cacheDir := filepath.Join(dir, "cache")

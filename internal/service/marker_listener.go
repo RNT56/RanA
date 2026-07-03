@@ -212,7 +212,15 @@ func (m *MarkerListener) handleLine(line []byte) {
 		return
 	}
 
-	_ = m.cfg.Emit(ev) // best-effort at this layer; svc's Emit wraps ledger.Append and logs/handles failures itself
+	// KNOWN GAP (P5): Emit's error is currently discarded here with no
+	// logging and no gap event. svc's Emit callbacks (emitMarker/emitDigest,
+	// lifecycle.go) only propagate ledger.Append's error as a return value —
+	// they do not log or handle it themselves — so today a failed marker
+	// append (including a fatal Writer.Err() commit failure) is silently
+	// lost. This needs a real fault-sink wired from Service.Config before
+	// svc is connected to a cmd/ host process; see the identical gap at
+	// digest.go's Emit call site.
+	_ = m.cfg.Emit(ev)
 }
 
 // constantTimeTokenEq compares two tokens without leaking a timing side

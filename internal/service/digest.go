@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -14,6 +15,22 @@ import (
 	"github.com/RNT56/RanA/internal/schema"
 	"lukechampine.com/blake3"
 )
+
+// maxDigestBytes bounds how large a file this worker will read into memory
+// to BLAKE3-digest. Digest scopes point at agent workspaces (docs/PROFILES.md
+// §[digest]: "the agent's workspace, the repo working tree") which an
+// adversarial or merely careless agent fully controls — without a cap, a
+// single huge file written into a digest scope forces this long-lived
+// process to buffer arbitrarily large content in RAM on every settle,
+// which is exactly the kind of unbounded-resource-on-adversarial-input
+// this worker must not allow (P2/P5 spirit: digesting is best-effort
+// enrichment, never something a hostile write can use against the
+// recorder itself). Files over this size are skipped the same way an
+// unreadable/vanished file is skipped today: no fs.settle is emitted for
+// that scan, and the next scan retries — the fact of the write is still
+// on the record via the kernel-sourced fs.write_open event; only the
+// content digest is foregone.
+const maxDigestBytes = 256 * 1024 * 1024 // 256MiB
 
 // DigestWorkerConfig configures a DigestWorker.
 type DigestWorkerConfig struct {
@@ -236,12 +253,30 @@ func (w *DigestWorker) ScanOnce(now time.Time) {
 // back to a previously-seen value — e.g. touch with no content change —
 // still gets read once here, but only emits if the digest differs).
 func (w *DigestWorker) maybeDigest(p string, st *fileState, size int64, now time.Time) {
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return // vanished or unreadable between stat and read; skip silently, next scan retries
+	if size > maxDigestBytes {
+		return // too large to safely buffer/hash; skip silently, next scan retries
 	}
-	sum := blake3.Sum256(data)
-	digest := sum[:]
+
+	f, err := os.Open(p)
+	if err != nil {
+		return // vanished or unreadable between stat and open; skip silently, next scan retries
+	}
+	defer f.Close()
+
+	h := blake3.New(32, nil)
+	// Cap the read at maxDigestBytes+1 (rather than trusting the size we
+	// stat'd earlier) so a file that grows between stat and read cannot
+	// make this loop buffer/hash unbounded content either — read one byte
+	// past the cap purely to detect "still growing past the limit" and
+	// bail without ever holding more than maxDigestBytes+1 bytes.
+	n, err := io.Copy(h, io.LimitReader(f, maxDigestBytes+1))
+	if err != nil {
+		return // read error mid-file; skip silently, next scan retries
+	}
+	if n > maxDigestBytes {
+		return // grew past the cap while reading; skip silently, next scan retries
+	}
+	digest := h.Sum(nil)
 
 	if st.everDigested && bytesEqual(digest, st.settledDigest) {
 		return // content unchanged from last settle (e.g. touch with no write)
@@ -262,6 +297,10 @@ func (w *DigestWorker) maybeDigest(p string, st *fileState, size int64, now time
 	st.settledSize = size
 	st.everDigested = true
 
+	// KNOWN GAP (P5): see the identical note at marker_listener.go's Emit
+	// call site — this discards Emit's error with no logging and no gap
+	// event, so a failed fs.settle append (including a fatal Writer.Err()
+	// commit failure) is silently lost today.
 	_ = w.cfg.Emit(ev)
 }
 

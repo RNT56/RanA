@@ -24,4 +24,4 @@ Beyond the usual (RCE, privilege escalation via `ranad`, the UI):
 - `ranad` runs with minimal capabilities, no listening TCP sockets, one SO_PEERCRED-gated unix socket, and a hardened systemd unit. See `docs/THREAT-MODEL.md §4`.
 - The ledger, signing key, and UI live at user privilege; the root daemon never touches them — except the root-owned checkpoint-head mirror, which exists precisely to bound same-uid tampering (`LIMITS.md §6.1`).
 - Releases are reproducible-built, cosign-signed, ship an SBOM, and contain no postinstall scripts. Verify the signature before installing a root daemon — including this one.
-- No telemetry, no phone-home, no auto-update. `rana doctor --check-update` is the only network call the tool ever makes on its own behalf, and only when you run it.
+- No telemetry, no phone-home, no auto-update. RanA makes no network call on its own behalf at all today. The plan (D24) reserves an explicit, opt-in `rana doctor --check-update` as the only acceptable future exception to "no update check by default"; it is not implemented yet — until it lands, there is no update-check code path of any kind, not even a documented flag to opt into.

@@ -115,4 +115,5 @@ warning.
 - Guest agent uid is pinned to 1000; a mount-time normalization maps
   ownership so tools behave.
 - Project toolchains beyond the runtime layer (compilers, interpreters) are
-  user-provisioned in-guest (`rana vm shell`).
+  user-provisioned in-guest. (`rana vm` currently exposes `status | start |
+  stop | reset`; there is no interactive-shell subcommand yet.)

@@ -82,9 +82,10 @@ func run() error {
 	}
 
 	clock := collector.SystemClock
+	dnsCache := collector.NewDNSCache(clock)
 	enricher := collector.NewEnricher(collector.EnricherConfig{
 		Pipeline: pipeline,
-		DNSCache: collector.NewDNSCache(clock),
+		DNSCache: dnsCache,
 		Clock:    clock,
 	})
 
@@ -106,6 +107,17 @@ func run() error {
 		return fmt.Errorf("ranad: record source: %w", err)
 	}
 	defer closeSource()
+
+	// The DNS cache accumulates one entry per distinct resolved address for
+	// as long as ranad runs — Join already refuses expired entries on its
+	// own, but nothing removes them, so without a periodic sweep a
+	// long-lived daemon's cache grows without bound over the machine's
+	// uptime (every address any recorded agent's DNS answers ever
+	// mentioned). GC is independent of the svc connection lifecycle (a
+	// disconnected ranad still decodes ring-buffer records and observes DNS
+	// answers), so it runs on its own ticker tied to ctx rather than inside
+	// daemonLoop's per-connection loop.
+	go runDNSCacheGC(ctx, dnsCache, clock)
 
 	return daemonLoop(ctx, daemonLoopConfig{
 		SockPath:    sockPath,
@@ -189,6 +201,32 @@ func daemonLoop(ctx context.Context, cfg daemonLoopConfig) error {
 
 		if err := serveConnection(ctx, conn, cfg); err != nil {
 			log.Printf("ranad: connection to svc ended: %v", err)
+		}
+	}
+}
+
+// dnsCacheGCInterval is how often runDNSCacheGC sweeps expired entries out
+// of the DNS cache. Independent of any per-session or per-connection
+// cadence — DNS answers are observed and joined regardless of which
+// session's ring-buffer records are currently flowing.
+const dnsCacheGCInterval = 5 * time.Minute
+
+// runDNSCacheGC periodically sweeps cache of TTL-expired entries until ctx
+// is cancelled, bounding the cache's memory footprint over a long-lived
+// daemon's uptime (collector.DNSCache.GC's doc comment: "Join already
+// refuses expired entries on its own, so GC is a cleanliness/memory
+// concern, not a correctness one" — but a concern that must actually be
+// acted on for a daemon that outlives many sessions and resolves many
+// distinct addresses).
+func runDNSCacheGC(ctx context.Context, cache *collector.DNSCache, clock collector.Clock) {
+	ticker := time.NewTicker(dnsCacheGCInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cache.GC(clock.Now())
 		}
 	}
 }

@@ -4,11 +4,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"path/filepath"
 	"time"
 
 	"github.com/RNT56/RanA/internal/ledger"
 )
+
+// defaultHeadsLogPath is where ranad's root-owned, append-only checkpoint
+// mirror actually lives (cmd/ranad/main_linux.go's defaultDataDir, D27,
+// docs/TRUST.md §5, LIMITS.md §6.1). It is deliberately NOT derived from the
+// user's --data directory: the whole point of the mirror is to sit outside
+// the uid a same-user attacker controls, so defaulting --heads-log to
+// <data>/heads.log would silently check the ledger against a copy that
+// attacker can also rewrite.
+const defaultHeadsLogPath = "/var/lib/rana/heads.log"
 
 // findingLine renders a verify Finding as one human-readable line.
 func findingLine(f ledger.Finding) string {
@@ -36,7 +44,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	dataDir := fs.String("data", defaultDataDir(), "RanA data directory")
 	session := fs.String("session", "", "verify only this session id (default: all)")
 	mirror := fs.Bool("mirror", false, "cross-check against the root-owned heads.log (plan D27)")
-	headsLog := fs.String("heads-log", "", "path to heads.log (default: <data>/heads.log)")
+	headsLog := fs.String("heads-log", "", "path to the root-owned heads.log (default: "+defaultHeadsLogPath+"; NOT under --data, which a same-uid attacker can rewrite — plan D27, docs/TRUST.md §5)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -46,7 +54,15 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	if *mirror {
 		opts.HeadsLogPath = *headsLog
 		if opts.HeadsLogPath == "" {
-			opts.HeadsLogPath = filepath.Join(*dataDir, "heads.log")
+			// The mirror's whole purpose (D27) is to live outside the uid a
+			// same-user attacker controls, so the default must NOT be
+			// derived from --data (the user-owned datadir) — it must be the
+			// root-owned system path ranad actually writes to
+			// (cmd/ranad/main_linux.go defaultDataDir, docs/TRUST.md §5,
+			// LIMITS.md §6.1). Defaulting to <data>/heads.log would silently
+			// cross-check against a file the attacker can also rewrite,
+			// defeating the property --mirror exists to provide.
+			opts.HeadsLogPath = defaultHeadsLogPath
 		}
 	}
 

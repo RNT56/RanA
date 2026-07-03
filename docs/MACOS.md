@@ -50,4 +50,4 @@ codesign --entitlements vz.entitlements -s - ./rana   # ad-hoc signature is suff
 - Native macOS agents: **not recorded, at all.** The guest is the recording boundary.
 - Native-app automation (AppleScript, iMessage, GUI): invisible from inside the guest; RanA cannot record those effects.
 - virtiofs seams: no inotify for host-side changes (in-guest file-watchers won't fire on them); weaker lock semantics — OpenClaw's own state DB lives on the data volume for this reason.
-- Toolchains: the runtime layer covers Node agents; your project's compilers/interpreters are yours to install in-guest (`rana vm shell`), or a coding agent in the guest can edit and fetch but not build.
+- Toolchains: the runtime layer covers Node agents; your project's compilers/interpreters are yours to install in-guest, or a coding agent in the guest can edit and fetch but not build. (`rana vm` currently exposes `status | start | stop | reset`; there is no interactive-shell subcommand yet — in-guest installs go through the data volume and a session's own tooling, not a separate `rana vm` entry point.)

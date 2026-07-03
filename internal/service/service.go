@@ -194,6 +194,15 @@ func NewService(cfg Config) (*Service, error) {
 	}
 	svc.alertEngine = engine
 
+	// KNOWN GAP (P5): OnDecodeError is intentionally left nil here today —
+	// there is no logger/fault-sink dependency in this package yet, and no
+	// cmd/ entry point wires a *Service into a running process to own that
+	// decision. Until one is added, a fatal ledger.Writer commit error (see
+	// ledger.Writer.Err's doc comment) surfaces only as a per-call error
+	// return from AppendEncoded/Append; every subsequent kernel/marker/
+	// digest event then silently fails to append with no log and no gap
+	// event. This must be closed before svc is wired into a production
+	// cmd/ host process.
 	svc.ranadServer = NewRanadServer(RanadServerConfig{
 		Appender:       appenderFunc(svc.appendKernelEvent),
 		RequirePeerUID: cfg.RequireRanadUID,

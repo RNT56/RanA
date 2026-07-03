@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/RNT56/RanA/internal/ledger"
 	"github.com/RNT56/RanA/internal/schema"
+
+	_ "modernc.org/sqlite"
 )
 
 func newTestLedgerDir(t *testing.T) ledger.Datadir {
@@ -164,6 +167,78 @@ func TestLedgerDataSource_AlertsFiltersToAlertTypes(t *testing.T) {
 	}
 	if alerts[0].Type != schema.EventTypeAlertNewDomain {
 		t.Fatalf("alert type = %q", alerts[0].Type)
+	}
+}
+
+// TestLedgerDataSource_AlertsIgnoresForgedMirrorColumn proves Alerts()
+// derives which rows are alerts from the authoritative canonical CBOR in
+// `bytes`, not from the events table's `type` mirror column (which is
+// written but never hashed or cross-checked by chain verification — see
+// internal/ledger/export.go's decodeEventEnvelopeFields and
+// export_test.go's analogous export proof). An attacker with raw sqlite
+// write access who forges only the mirror column (leaving `bytes`
+// untouched, so `rana verify` still reports the chain intact) must not be
+// able to hide a real alert from, or fabricate a fake alert into, the
+// live UI's alert feed.
+func TestLedgerDataSource_AlertsIgnoresForgedMirrorColumn(t *testing.T) {
+	dir := newTestLedgerDir(t)
+	session := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+	w, err := ledger.NewWriter(dir, ledger.WriterOptions{})
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	defer w.Close()
+
+	if err := w.Append(schema.NewSessionStart(session, 0, 1, 0, 0, 42, "generic", nil, map[string]any{}, nil)); err != nil {
+		t.Fatalf("Append session.start: %v", err)
+	}
+	if err := w.Append(schema.NewAlertNewDomain(session, 0, 2, 1000, 2000, 42, "example.com")); err != nil {
+		t.Fatalf("Append alert.new_domain: %v", err)
+	}
+	if err := w.FlushForTest(); err != nil {
+		t.Fatalf("FlushForTest: %v", err)
+	}
+	if err := w.SealSession(session); err != nil {
+		t.Fatalf("SealSession: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", dir.DBPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	// Hide the real alert by forging its mirror column only; `bytes` (the
+	// hashed record) is untouched.
+	if _, err := db.Exec(`UPDATE events SET type = 'proc.exec' WHERE session = ? AND type = 'alert.new_domain'`, session); err != nil {
+		t.Fatalf("forging away the real alert's mirror column: %v", err)
+	}
+	// Fabricate a decoy alert on the session.start row by forging its
+	// mirror column only.
+	if _, err := db.Exec(`UPDATE events SET type = 'alert.new_domain' WHERE session = ? AND idx = 1`, session); err != nil {
+		t.Fatalf("forging a decoy alert mirror column: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("closing db: %v", err)
+	}
+
+	ds, err := NewLedgerDataSource(dir)
+	if err != nil {
+		t.Fatalf("NewLedgerDataSource: %v", err)
+	}
+	defer ds.Close()
+
+	alerts, err := ds.Alerts(context.Background(), session)
+	if err != nil {
+		t.Fatalf("Alerts: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("got %d alerts, want 1 (the real alert, unaffected by the forged mirror columns): %+v", len(alerts), alerts)
+	}
+	if alerts[0].Type != schema.EventTypeAlertNewDomain {
+		t.Fatalf("alert type = %q, want alert.new_domain", alerts[0].Type)
+	}
+	if alerts[0].Idx != 2 {
+		t.Fatalf("alert idx = %d, want 2 (the real alert row, not the decoy at idx 1)", alerts[0].Idx)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/RNT56/RanA/internal/ledger"
@@ -119,9 +120,26 @@ func (ds *LedgerDataSource) Events(ctx context.Context, sessionID string, after 
 	return out, rows.Err()
 }
 
+// alertTypePrefix is the EventType prefix that identifies an alert event.
+// Kept in sync with schema's alert.* EventType constants.
+const alertTypePrefix = "alert."
+
 // Alerts implements ui.DataSource: every alert.* event for sessionID.
+//
+// This deliberately does NOT filter using the events table's `type` mirror
+// column (unlike a naive `WHERE type LIKE 'alert.%'`): that column is
+// written but never hashed or cross-checked by chain verification (see
+// internal/ledger/export.go's decodeEventEnvelopeFields and
+// export_test.go), so an attacker with raw sqlite write access to
+// ledger.db could UPDATE it to hide a real alert row or fabricate a fake
+// one in the live UI without `rana verify` ever noticing — the persisted,
+// hashed `bytes` column would be untouched. Filtering on the decoded
+// ev.Type instead (the same authoritative field export and verify trust)
+// closes that gap for the live alert feed too. Alerts are a low-volume
+// event class, so the extra per-row decode cost of scanning every event
+// in the session is acceptable.
 func (ds *LedgerDataSource) Alerts(ctx context.Context, sessionID string) ([]schema.Event, error) {
-	rows, err := ds.db.QueryContext(ctx, `SELECT bytes FROM events WHERE session = ? AND type LIKE 'alert.%' ORDER BY idx ASC`, sessionID)
+	rows, err := ds.db.QueryContext(ctx, `SELECT bytes FROM events WHERE session = ? ORDER BY idx ASC`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("service: querying alerts: %w", err)
 	}
@@ -139,6 +157,9 @@ func (ds *LedgerDataSource) Alerts(ctx context.Context, sessionID string) ([]sch
 		var ev schema.Event
 		if err := decodeEventFrame(raw, &ev); err != nil {
 			return nil, fmt.Errorf("service: decoding alert row: %w", err)
+		}
+		if !strings.HasPrefix(string(ev.Type), alertTypePrefix) {
+			continue
 		}
 		out = append(out, ev)
 	}

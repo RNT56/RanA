@@ -123,6 +123,51 @@ func TestVerify_ExitCodeMapping(t *testing.T) {
 	}
 }
 
+// TestVerify_MirrorDefaultHeadsLogIsNotUnderData is the regression test for
+// the D27 same-uid custody property: `rana verify --mirror` without an
+// explicit --heads-log MUST NOT default to a path inside --data (the
+// user-owned datadir a same-uid attacker can freely rewrite). It must
+// default to the documented root-owned mirror path
+// (cmd/ranad/main_linux.go's defaultDataDir, docs/TRUST.md §5,
+// LIMITS.md §6.1) instead.
+//
+// We prove it by planting a *forged* heads.log under --data that would make
+// a tampered ledger look clean if (and only if) the CLI mistakenly read the
+// mirror from <data>/heads.log instead of the fixed root-owned path: since
+// the real mirror doesn't exist in this test environment, a correct default
+// must ignore the forged file entirely and verify must still see the
+// ledger's own tamper (via the non-mirror checks), while the forged file
+// under --data is never consulted.
+func TestVerify_MirrorDefaultHeadsLogIsNotUnderData(t *testing.T) {
+	root, _ := buildLedger(t)
+
+	// The default must be the fixed, documented root-owned path — never
+	// something derived from --data.
+	wrongDefault := filepath.Join(root, "heads.log")
+	if defaultHeadsLogPath == wrongDefault {
+		t.Fatalf("defaultHeadsLogPath must not be derived from --data; got %q", defaultHeadsLogPath)
+	}
+	if defaultHeadsLogPath != "/var/lib/rana/heads.log" {
+		t.Fatalf("defaultHeadsLogPath = %q, want the documented root-owned mirror path /var/lib/rana/heads.log (docs/TRUST.md §5, LIMITS.md §6.1, plan D27)", defaultHeadsLogPath)
+	}
+
+	// Plant a heads.log under --data. If the CLI's default ever regresses to
+	// <data>/heads.log, this file would be read; it must not be, so its
+	// presence/content must have zero effect on the exit code below.
+	if err := os.WriteFile(filepath.Join(root, "heads.log"), []byte(`{"session":"bogus","seg_last":0}`+"\n"), 0o600); err != nil {
+		t.Fatalf("planting forged heads.log under --data: %v", err)
+	}
+
+	// Corrupt the ledger so the non-mirror checks (leaf/merkle/chain) must
+	// still catch it — proving the run didn't just short-circuit to "OK"
+	// via the forged mirror file.
+	corruptEventByte(t, root)
+	code, out, _ := run("verify", "--data", root, "--mirror")
+	if code != 2 {
+		t.Fatalf("tampered ledger with a forged <data>/heads.log present: verify --mirror exit = %d, want 2 (BROKEN); the forged file under --data must never be consulted (out=%q)", code, out)
+	}
+}
+
 // corruptEventByte flips a byte inside one stored event's canonical CBOR via
 // SQL, keeping the SQLite file itself valid so Verify returns a clean Code=2
 // (a leaf-hash mismatch) rather than a database-open error.

@@ -1,0 +1,93 @@
+# RanA profile: openclaw  — THE HERO PROFILE
+# OpenClaw: a single long-lived Gateway daemon (one per host) that owns all
+# messaging surfaces and fans out to sub-agents, tool processes, and MCP servers.
+# `openclaw gateway` runs foreground (launchd/systemd-supervised),
+# default bind 127.0.0.1:18789, config under ~/.openclaw/.
+#
+# Why OpenClaw is the hero: its own multi-agent fan-out IS RanA's session tree.
+# One cgroup slice captures the gateway + every sub-agent + every exec + every
+# egress by inheritance. The timeline reads as "conversation -> consequences".
+# The entire pitch is one line:  rana adopt openclaw
+
+[profile]
+name        = "openclaw"
+description = "OpenClaw personal agent — full local access (Gmail/Stripe/filesystem/shell)."
+version     = 1
+
+[match]
+auto = true
+exe_basename = ["openclaw"]
+argv_contains = ["gateway"]
+# adopt detects an existing install via ~/.openclaw/ and a gateway on :18789.
+
+[adopt]
+# The lifecycle `rana adopt openclaw` drives.
+config_dir       = "~/.openclaw"
+gateway_port     = 18789
+# Linux: write a systemd drop-in placing the gateway unit under rana.slice, then
+#        restart (with confirmation). Children inherit the session cgroup.
+# macOS: host the gateway INSIDE the rana guest VM — the only recording path on
+#        macOS (a native gateway produces zero kernel events; plan D15/D18).
+#        Adopt installs the Linux build onto the guest data volume, projects
+#        ~/.openclaw via virtiofs, and port-forwards :18789 to host localhost.
+#        ("inferred" below refers only to running WITHOUT the marker plugin.)
+linux_supervisor  = "systemd"
+macos_supervisor  = "launchd"
+consent_default   = "yes"          # prompted at adopt-time; user can decline
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true             # OpenClaw reaches many services; unix egress matters
+
+[digest]
+# OpenClaw's agent workspace is where durable artifacts land.
+scopes = ["~/.openclaw/workspace/**"]
+exclude = ["~/.openclaw/**/cache/**", "~/.openclaw/**/*.log"]
+
+[sensitive_read]
+# OpenClaw's broad integrations make the credential surface wide. These reads
+# are the precursor to the exfiltration class the whole tool exists to catch.
+extra = [
+  "~/.openclaw/credentials*",
+  "~/.openclaw/**/oauth*",         # OpenClaw OAuth token stores
+  "~/.config/**/token*",
+  # broad provider creds an over-permissioned personal agent may touch:
+  "~/.aws/**", "~/.config/gcloud/**", "~/.config/gh/**",
+]
+
+[markers]
+# The optional ~100-LOC OpenClaw plugin emits run-lifecycle markers over the
+# rana marker socket. This is what upgrades the raw event river into
+# "inbound message -> these execs -> these egress connects -> this file changed."
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId, agentId, channel, status  -> yes
+#   message text / prompt / completion -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"   # per-session random token issued at adopt/run time
+events        = ["run.start", "run.end"]
+# maps to OpenClaw's WS agent lifecycle:
+#   req:agent -> res:agent ack {runId, status:"accepted"}   => run.start
+#   res:agent final {runId, status, summary}                => run.end
+# (see plugins/openclaw/rana-plugin.js)
+carry_fields  = ["runId", "agentId", "channel", "status"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
+
+[timeline]
+# Causality lens: cluster events by runId (from markers) into "consequences of
+# a message". Without the plugin, fall back to time+process-tree clustering
+# labeled `inferred`.
+lens          = "causality"
+cluster_by    = "runId"
+fallback_lens = "inferred"
+
+[retention]
+# Personal-agent sessions are long-lived; keep more history but still bounded.
+ttl_days = 60

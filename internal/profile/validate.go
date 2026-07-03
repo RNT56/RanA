@@ -58,9 +58,10 @@ func isForbiddenMarkerField(f string) bool {
 }
 
 // validate applies the additive-only invariants (docs/PROFILES.md) to a
-// parsed Profile. doc is the raw TOML document, used to distinguish "key
-// absent" from "key explicitly false" for the capture freeze check.
-func validate(doc *tomlDoc, p *Profile) error {
+// parsed Profile. doc is the decoded TOML document, used to distinguish "key
+// absent" from "key explicitly false" for the capture freeze check (the DTO
+// carries [capture] booleans as *bool for exactly this reason).
+func validate(doc *decodeDoc, p *Profile) error {
 	if err := validateCapture(doc); err != nil {
 		return err
 	}
@@ -89,12 +90,14 @@ func validate(doc *tomlDoc, p *Profile) error {
 // docs/PROFILES.md freezes as always-on: exec, network_connect, and
 // sensitive-read. Sensitive-read has no [capture] toggle at all (it is
 // controlled solely by the watchlist, additive-only by construction), so
-// only exec and network_connect need an explicit key check here.
-func validateCapture(doc *tomlDoc) error {
-	if doc.has("capture", "exec") && !doc.boolVal("capture", "exec") {
+// only exec and network_connect need an explicit key check here. A nil *bool
+// means the key was absent (defaults on, allowed); only an explicit
+// "= false" is rejected.
+func validateCapture(doc *decodeDoc) error {
+	if p := doc.Capture.Exec; p != nil && !*p {
 		return fmt.Errorf("%w: capture.exec", ErrCaptureDisabled)
 	}
-	if doc.has("capture", "network_connect") && !doc.boolVal("capture", "network_connect") {
+	if p := doc.Capture.NetworkConnect; p != nil && !*p {
 		return fmt.Errorf("%w: capture.network_connect", ErrCaptureDisabled)
 	}
 	return nil

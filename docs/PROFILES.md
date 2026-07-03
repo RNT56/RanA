@@ -14,6 +14,16 @@ The hard rule before any syntax: **profiles can only make RanA stricter or riche
 ### `[match]`
 How `rana` recognizes the agent when no `--profile` is given: `exe_basename` (list), `argv_contains` (list), `auto` (bool — whether this profile may be selected automatically). Matching is a convenience, not attribution — attribution is always the cgroup.
 
+### `[adopt]`
+Optional. Present only in packs that `rana adopt <profile>` knows how to take over in place (currently just `openclaw`). It parameterizes that lifecycle; it does not affect what RanA captures. Fields:
+- `config_dir` — the agent's on-disk config root, used to detect an existing install (openclaw: `~/.openclaw`).
+- `gateway_port` (integer) — the local port the adopted daemon binds, used for a liveness probe and, on macOS, host↔guest port forwarding.
+- `linux_supervisor` — the init system whose unit is rewritten to place the daemon under `rana.slice` (e.g. `systemd`).
+- `macos_supervisor` — the supervisor for the guest-hosted daemon on macOS (e.g. `launchd`).
+- `consent_default` — the default answer to the adopt-time consent prompt (e.g. `yes`); the user can always decline interactively.
+
+Adopt is opt-in and interactive: a profile carrying `[adopt]` still only takes effect when the user explicitly runs `rana adopt`. Packs without an `[adopt]` table are adopted generically (no supervisor rewrite).
+
 ### `[capture]`
 Booleans per event class (`exec`, `fork_exit`, `file_write`, `file_meta_ops`, `network_connect`, `network_flow`, `unix_sockets`). These exist for future *narrowing within policy*; in v1 all shipped profiles keep the full D7 set on, and `exec`/`network_connect`/sensitive-read cannot be disabled by any profile.
 

@@ -82,6 +82,30 @@ type Markers struct {
 	ForbidFields []string
 }
 
+// Adopt holds the lifecycle parameters `rana adopt <profile>` drives
+// (docs/PROFILES.md [adopt]). It is populated only for packs that declare an
+// [adopt] table — currently just openclaw.toml, the hero adopt target — and
+// is nil on Profile otherwise. The profile package only models and validates
+// these fields; internal/session consumes them to actually place the agent
+// under a rana cgroup slice.
+type Adopt struct {
+	// ConfigDir is the agent's on-disk config root, used to detect an
+	// existing install (openclaw: "~/.openclaw").
+	ConfigDir string
+	// GatewayPort is the local port the adopted daemon binds, used for a
+	// liveness probe and (on macOS) host<->guest port forwarding.
+	GatewayPort int64
+	// LinuxSupervisor names the init system whose unit is rewritten to place
+	// the daemon under rana.slice (e.g. "systemd").
+	LinuxSupervisor string
+	// MacOSSupervisor names the macOS supervisor for the guest-hosted daemon
+	// (e.g. "launchd").
+	MacOSSupervisor string
+	// ConsentDefault is the default answer to the adopt-time consent prompt
+	// (e.g. "yes"); the user can always decline interactively.
+	ConsentDefault string
+}
+
 // Timeline holds UI presentation hints (docs/PROFILES.md [timeline]). These
 // are display-only and never affect what is captured or retained.
 type Timeline struct {
@@ -102,6 +126,7 @@ type Profile struct {
 	Version     int64
 
 	Match         MatchRule
+	Adopt         *Adopt
 	Capture       Capture
 	Digest        Digest
 	SensitiveRead SensitiveRead
@@ -118,65 +143,73 @@ type Profile struct {
 // Parse parses and validates src (TOML) as a profile pack. source names the
 // input for error messages (a file path, or an embedded pack name) and does
 // not affect parsing.
+//
+// Parsing uses github.com/pelletier/go-toml/v2 (a spec-complete parser):
+// malformed syntax, duplicate keys, and type mismatches are rejected with a
+// wrapped error rather than silently tolerated. The additive-only validation
+// invariants (docs/PROFILES.md; see validate.go) are applied unchanged after
+// decode.
 func Parse(src, source string) (*Profile, error) {
-	doc, err := parseTOML(src)
+	doc, hasProfile, err := decodeTOML(src)
 	if err != nil {
 		return nil, fmt.Errorf("profile %s: %w", source, err)
 	}
 
-	if !doc.hasSection("profile") {
+	if !hasProfile {
 		return nil, fmt.Errorf("profile %s: %w", source, ErrMissingProfileSection)
 	}
-	name := doc.str("profile", "name")
+	name := doc.Profile.Name
 	if name == "" {
 		return nil, fmt.Errorf("profile %s: %w", source, ErrMissingName)
 	}
 
 	p := &Profile{
 		Name:        name,
-		Description: doc.str("profile", "description"),
-		Version:     doc.int("profile", "version"),
+		Description: doc.Profile.Description,
+		Version:     doc.Profile.Version,
 		source:      source,
 
 		Match: MatchRule{
-			Auto:         doc.boolVal("match", "auto"),
-			ExeBasename:  doc.strSlice("match", "exe_basename"),
-			ArgvContains: doc.strSlice("match", "argv_contains"),
+			Auto:         doc.Match.Auto,
+			ExeBasename:  doc.Match.ExeBasename,
+			ArgvContains: doc.Match.ArgvContains,
 		},
 
-		Capture: parseCapture(doc),
+		Adopt: mapAdopt(doc.Adopt),
+
+		Capture: mapCapture(doc),
 
 		Digest: Digest{
-			Scopes:  doc.strSlice("digest", "scopes"),
-			Exclude: doc.strSlice("digest", "exclude"),
+			Scopes:  doc.Digest.Scopes,
+			Exclude: doc.Digest.Exclude,
 		},
 
 		SensitiveRead: SensitiveRead{
-			Extra: doc.strSlice("sensitive_read", "extra"),
+			Extra: doc.SensitiveRead.Extra,
 		},
 
 		Redaction: Redaction{
-			ExtraPatterns:    doc.strSlice("redaction", "extra_patterns"),
-			EntropyMinLen:    int(doc.int("redaction", "entropy_min_len")),
-			EntropyThreshold: doc.float64Val("redaction", "entropy_threshold"),
+			ExtraPatterns:    doc.Redaction.ExtraPatterns,
+			EntropyMinLen:    doc.Redaction.EntropyMinLen,
+			EntropyThreshold: doc.Redaction.EntropyThreshold,
 		},
 
 		Markers: Markers{
-			Enabled:      doc.boolVal("markers", "enabled"),
-			Socket:       doc.str("markers", "socket"),
-			Events:       doc.strSlice("markers", "events"),
-			CarryFields:  doc.strSlice("markers", "carry_fields"),
-			ForbidFields: doc.strSlice("markers", "forbid_fields"),
+			Enabled:      doc.Markers.Enabled,
+			Socket:       doc.Markers.Socket,
+			Events:       doc.Markers.Events,
+			CarryFields:  doc.Markers.CarryFields,
+			ForbidFields: doc.Markers.ForbidFields,
 		},
 
 		Timeline: Timeline{
-			Lens:         doc.str("timeline", "lens"),
-			ClusterBy:    doc.str("timeline", "cluster_by"),
-			FallbackLens: doc.str("timeline", "fallback_lens"),
+			Lens:         doc.Timeline.Lens,
+			ClusterBy:    doc.Timeline.ClusterBy,
+			FallbackLens: doc.Timeline.FallbackLens,
 		},
 
 		Retention: Retention{
-			TTLDays: doc.int("retention", "ttl_days"),
+			TTLDays: doc.Retention.TTLDays,
 		},
 	}
 
@@ -187,25 +220,42 @@ func Parse(src, source string) (*Profile, error) {
 	return p, nil
 }
 
-// parseCapture reads [capture] booleans, defaulting every class to true
-// (the D7 baseline, docs/PROFILES.md: "in v1 all shipped profiles keep the
-// full D7 set on") when the key — or the whole [capture] table — is absent,
-// so an omitted [capture] section (as in a minimal custom profile) is never
-// silently narrower than the baseline.
-func parseCapture(doc *tomlDoc) Capture {
-	get := func(key string) bool {
-		if doc.has("capture", key) {
-			return doc.boolVal("capture", key)
+// mapAdopt converts the decoded [adopt] DTO (nil when the table is absent)
+// into the exported Adopt struct, preserving the nil-when-absent contract so
+// packs without an [adopt] table have a nil Profile.Adopt.
+func mapAdopt(a *adoptDTO) *Adopt {
+	if a == nil {
+		return nil
+	}
+	return &Adopt{
+		ConfigDir:       a.ConfigDir,
+		GatewayPort:     a.GatewayPort,
+		LinuxSupervisor: a.LinuxSupervisor,
+		MacOSSupervisor: a.MacOSSupervisor,
+		ConsentDefault:  a.ConsentDefault,
+	}
+}
+
+// mapCapture reads the decoded [capture] booleans, defaulting every class to
+// true (the D7 baseline, docs/PROFILES.md: "in v1 all shipped profiles keep
+// the full D7 set on") when the key — or the whole [capture] table — is
+// absent, so an omitted [capture] section (as in a minimal custom profile)
+// is never silently narrower than the baseline. Presence is carried by the
+// DTO's *bool fields: nil ⇒ absent ⇒ default true.
+func mapCapture(doc *decodeDoc) Capture {
+	get := func(p *bool) bool {
+		if p == nil {
+			return true
 		}
-		return true
+		return *p
 	}
 	return Capture{
-		Exec:           get("exec"),
-		ForkExit:       get("fork_exit"),
-		FileWrite:      get("file_write"),
-		FileMetaOps:    get("file_meta_ops"),
-		NetworkConnect: get("network_connect"),
-		NetworkFlow:    get("network_flow"),
-		UnixSockets:    get("unix_sockets"),
+		Exec:           get(doc.Capture.Exec),
+		ForkExit:       get(doc.Capture.ForkExit),
+		FileWrite:      get(doc.Capture.FileWrite),
+		FileMetaOps:    get(doc.Capture.FileMetaOps),
+		NetworkConnect: get(doc.Capture.NetworkConnect),
+		NetworkFlow:    get(doc.Capture.NetworkFlow),
+		UnixSockets:    get(doc.Capture.UnixSockets),
 	}
 }

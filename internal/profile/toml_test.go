@@ -2,151 +2,164 @@ package profile
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
-func TestParseTOML_Basic(t *testing.T) {
+// The hand-rolled TOML subset parser (and its parseTOML/tomlDoc internal
+// tests) was replaced by github.com/pelletier/go-toml/v2. The behaviors the
+// old internal tests covered (comments, multi-line arrays, quoted-string
+// escapes, syntax-error rejection) are re-asserted here at the Parse level —
+// the only surface that still exists — so nothing regresses, plus the new
+// robustness guarantees the spec-complete parser buys (duplicate-key and
+// type-mismatch rejection).
+
+// TestParse_CommentsAndMultilineArrays confirms the decoder handles the
+// syntax the shipped packs actually use: full-line and trailing comments,
+// and arrays that span multiple physical lines with a trailing comma.
+func TestParse_CommentsAndMultilineArrays(t *testing.T) {
 	src := `
-# comment
+# top-of-file comment
 [profile]
-name = "generic"
-description = "hello world"
+name = "x" # trailing comment
+description = "d"
 version = 1
 
-[match]
-auto = false
-exe_basename = ["a", "b"]
-
-[capture]
-exec = true
-fork_exit = false
-`
-	doc, err := parseTOML(src)
-	if err != nil {
-		t.Fatalf("parseTOML: %v", err)
-	}
-	if got := doc.str("profile", "name"); got != "generic" {
-		t.Fatalf("name = %q", got)
-	}
-	if got := doc.str("profile", "description"); got != "hello world" {
-		t.Fatalf("description = %q", got)
-	}
-	if got := doc.int("profile", "version"); got != 1 {
-		t.Fatalf("version = %d", got)
-	}
-	if got := doc.boolVal("match", "auto"); got != false {
-		t.Fatalf("auto = %v", got)
-	}
-	if got := doc.strSlice("match", "exe_basename"); !reflect.DeepEqual(got, []string{"a", "b"}) {
-		t.Fatalf("exe_basename = %#v", got)
-	}
-	if got := doc.boolVal("capture", "exec"); got != true {
-		t.Fatalf("exec = %v", got)
-	}
-}
-
-func TestParseTOML_MultilineArray(t *testing.T) {
-	src := `
 [sensitive_read]
+# a comment inside a table
 extra = [
   "~/.config/gh/**",
   "~/.npmrc",
   "~/.cargo/credentials*",
 ]
 `
-	doc, err := parseTOML(src)
+	p, err := Parse(src, "test")
 	if err != nil {
-		t.Fatalf("parseTOML: %v", err)
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Name != "x" {
+		t.Fatalf("Name = %q", p.Name)
 	}
 	want := []string{"~/.config/gh/**", "~/.npmrc", "~/.cargo/credentials*"}
-	if got := doc.strSlice("sensitive_read", "extra"); !reflect.DeepEqual(got, want) {
-		t.Fatalf("extra = %#v, want %#v", got, want)
+	if !reflect.DeepEqual(p.SensitiveRead.Extra, want) {
+		t.Fatalf("SensitiveRead.Extra = %#v, want %#v", p.SensitiveRead.Extra, want)
 	}
 }
 
-func TestParseTOML_EmptyArray(t *testing.T) {
-	src := `
-[digest]
-scopes = []
-`
-	doc, err := parseTOML(src)
+// TestParse_EmptyArray confirms an explicitly empty array decodes to an empty
+// (non-populated) slice, not an error.
+func TestParse_EmptyArray(t *testing.T) {
+	src := mustHeader() + "\n[digest]\nscopes = []\n"
+	p, err := Parse(src, "test")
 	if err != nil {
-		t.Fatalf("parseTOML: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
-	if got := doc.strSlice("digest", "scopes"); len(got) != 0 {
-		t.Fatalf("scopes = %#v, want empty", got)
+	if len(p.Digest.Scopes) != 0 {
+		t.Fatalf("Digest.Scopes = %#v, want empty", p.Digest.Scopes)
 	}
 }
 
-func TestParseTOML_CommentsAndBlankLines(t *testing.T) {
-	src := `
-# top comment
-
-[profile]
-# a comment about name
-name = "x" # trailing comment
-
-[match]
-
-auto = true
-`
-	doc, err := parseTOML(src)
+// TestParse_QuotedStringEscapes confirms standard TOML basic-string escapes
+// are honored (the old hand-rolled parser only supported \" \\ \n \t; the
+// real parser supports the full set).
+func TestParse_QuotedStringEscapes(t *testing.T) {
+	p, err := Parse("[profile]\nname = \"a\\\"b\\\\c\"\ndescription = \"d\"\nversion = 1\n", "test")
 	if err != nil {
-		t.Fatalf("parseTOML: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
-	if got := doc.str("profile", "name"); got != "x" {
-		t.Fatalf("name = %q", got)
-	}
-	if got := doc.boolVal("match", "auto"); got != true {
-		t.Fatalf("auto = %v", got)
+	if want := `a"b\c`; p.Name != want {
+		t.Fatalf("Name = %q, want %q", p.Name, want)
 	}
 }
 
-func TestParseTOML_MissingKeyDefaults(t *testing.T) {
-	doc, err := parseTOML("[profile]\nname = \"x\"\n")
-	if err != nil {
-		t.Fatalf("parseTOML: %v", err)
+// TestParse_MalformedTOMLRejected is the robustness gate the parser swap
+// buys: go-toml/v2 rejects malformed, duplicate-keyed, wrong-typed, and
+// truncated TOML with a clean error — never a panic, never silent
+// acceptance. Each case must fail Parse.
+func TestParse_MalformedTOMLRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "duplicate_key_in_table",
+			src:  "[profile]\nname = \"a\"\nname = \"b\"\nversion = 1\n",
+		},
+		{
+			name: "duplicate_table",
+			src:  "[profile]\nname = \"a\"\nversion = 1\n[profile]\ndescription = \"d\"\n",
+		},
+		{
+			name: "version_wrong_type_string",
+			src:  "[profile]\nname = \"a\"\nversion = \"not-an-int\"\n",
+		},
+		{
+			name: "auto_wrong_type_int",
+			src:  mustHeader() + "\n[match]\nauto = 3\n",
+		},
+		{
+			name: "exe_basename_wrong_type_scalar",
+			src:  mustHeader() + "\n[match]\nexe_basename = \"claude\"\n",
+		},
+		{
+			name: "capture_exec_wrong_type_string",
+			src:  mustHeader() + "\n[capture]\nexec = \"yes\"\n",
+		},
+		{
+			name: "unterminated_table_header",
+			src:  "[profile\nname = \"x\"\n",
+		},
+		{
+			name: "missing_value",
+			src:  "[profile]\nname =\n",
+		},
+		{
+			name: "missing_equals",
+			src:  "[profile]\nname \"x\"\n",
+		},
+		{
+			name: "unterminated_string",
+			src:  "[profile]\nname = \"unterminated\n",
+		},
+		{
+			name: "truncated_array",
+			src:  mustHeader() + "\n[digest]\nscopes = [\"a\", \"b\"\n",
+		},
+		{
+			name: "bare_key_outside_table",
+			src:  "name = \"x\"\n",
+		},
+		{
+			name: "entropy_threshold_wrong_type",
+			src:  mustHeader() + "\n[redaction]\nentropy_threshold = \"high\"\n",
+		},
 	}
-	if got := doc.str("profile", "missing"); got != "" {
-		t.Fatalf("missing str = %q", got)
-	}
-	if got := doc.strSlice("nosuch", "missing"); got != nil {
-		t.Fatalf("missing slice = %#v", got)
-	}
-	if got := doc.boolVal("nosuch", "missing"); got != false {
-		t.Fatalf("missing bool = %v", got)
-	}
-	if got := doc.int("nosuch", "missing"); got != 0 {
-		t.Fatalf("missing int = %d", got)
-	}
-	if doc.has("nosuch", "missing") {
-		t.Fatalf("has() true for missing key")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := func() (p *Profile, err error) {
+				// Guard against a panic being mistaken for a pass.
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("Parse panicked on malformed input: %v", r)
+					}
+				}()
+				return Parse(tc.src, "test")
+			}()
+			if err == nil {
+				t.Fatalf("expected error for malformed input, got Profile %#v", p)
+			}
+		})
 	}
 }
 
-func TestParseTOML_SyntaxErrors(t *testing.T) {
-	cases := []string{
-		"key = 1\n",                // key outside any table
-		"[profile\nname = \"x\"\n", // unterminated table header
-		"[profile]\nname = \n",     // missing value
-		"[profile]\nname x\n",      // missing '='
-		"[profile]\nname = \"unterminated\n",
+// TestParse_ErrorReferencesSource confirms a decode error is still wrapped
+// with the source name for a useful message.
+func TestParse_ErrorReferencesSource(t *testing.T) {
+	_, err := Parse("[profile]\nname = \"a\"\nname = \"b\"\n", "myfile.toml")
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	for i, src := range cases {
-		if _, err := parseTOML(src); err == nil {
-			t.Errorf("case %d: expected error, got nil", i)
-		}
-	}
-}
-
-func TestParseTOML_EscapesInStrings(t *testing.T) {
-	doc, err := parseTOML(`[profile]
-name = "a\"b\\c"
-`)
-	if err != nil {
-		t.Fatalf("parseTOML: %v", err)
-	}
-	if got, want := doc.str("profile", "name"), `a"b\c`; got != want {
-		t.Fatalf("name = %q, want %q", got, want)
+	if !strings.Contains(err.Error(), "myfile.toml") {
+		t.Errorf("error should reference source name, got: %v", err)
 	}
 }

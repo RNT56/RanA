@@ -22,6 +22,41 @@ func TestShippedPacks_ParseAndValidate(t *testing.T) {
 	}
 }
 
+// TestOpenclawAdoptRoundTrips confirms openclaw.toml's [adopt] table decodes
+// into Profile.Adopt with the authored values, and that the other three
+// shipped packs (which declare no [adopt] table) have a nil Adopt.
+func TestOpenclawAdoptRoundTrips(t *testing.T) {
+	oc, err := Load("openclaw")
+	if err != nil {
+		t.Fatalf("Load(openclaw): %v", err)
+	}
+	if oc.Adopt == nil {
+		t.Fatal("openclaw Adopt is nil, want populated [adopt] section")
+	}
+	want := Adopt{
+		ConfigDir:       "~/.openclaw",
+		GatewayPort:     18789,
+		LinuxSupervisor: "systemd",
+		MacOSSupervisor: "launchd",
+		ConsentDefault:  "yes",
+	}
+	if *oc.Adopt != want {
+		t.Errorf("openclaw Adopt = %#v, want %#v", *oc.Adopt, want)
+	}
+
+	for _, name := range []string{"generic", "claude-code", "codex"} {
+		t.Run(name, func(t *testing.T) {
+			p, err := Load(name)
+			if err != nil {
+				t.Fatalf("Load(%q): %v", name, err)
+			}
+			if p.Adopt != nil {
+				t.Errorf("%s Adopt = %#v, want nil (no [adopt] table)", name, *p.Adopt)
+			}
+		})
+	}
+}
+
 func TestLoad_UnknownProfile(t *testing.T) {
 	_, err := Load("does-not-exist")
 	if err == nil {

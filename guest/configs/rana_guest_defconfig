@@ -1,0 +1,59 @@
+# rana_guest_defconfig — Buildroot defconfig for the RanA macOS guest base
+# layer (D15). aarch64 "virt" board, minimal, BTF-enabled kernel, reproducible.
+#
+# Buildroot only builds on a Linux host / CI (guest/README.md). Merge with:
+#   make -C guest all
+#
+# Design goals: ≤60MB, reproducible (gate G8), and carrying exactly the kernel
+# features the D7 eBPF hooks + virtiofs/vsock projection need — no more.
+
+# --- Target: Apple Silicon guests are aarch64; "virt" is the vz machine. ---
+BR2_aarch64=y
+BR2_cortex_a72=y
+
+# --- Reproducible build (D23/G8). Honors SOURCE_DATE_EPOCH from the env. ---
+BR2_REPRODUCIBLE=y
+# Deterministic, single-threaded-safe host tooling where it matters.
+BR2_PER_PACKAGE_DIRECTORY=y
+
+# --- Toolchain: Buildroot-internal, glibc; static-friendly. ----------------
+BR2_TOOLCHAIN_BUILDROOT=y
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+
+# --- Init / userland: minimal. BusyBox init, no display, no networking cruft.
+BR2_INIT_BUSYBOX=y
+BR2_SYSTEM_BIN_SH_BUSYBOX=y
+# Small rootfs; the runtime layer (Node/git) is a SEPARATE layer, not here.
+BR2_TARGET_GENERIC_HOSTNAME="rana-guest"
+BR2_TARGET_GENERIC_ISSUE="RanA guest (base layer)"
+# Fixed guest agent uid alignment happens at mount time (uid 1000, D15); the
+# base rootfs stays root-owned.
+
+# --- Kernel: pinned version, custom config via fragment. -------------------
+# NOTE: pin the exact kernel version here (e.g. 6.6.x LTS — ships BTF, fentry,
+# cgroup sock_addr, ringbuf; RanA's 5.15 floor is exceeded so the guest always
+# runs the "baseline+" tier). Keep it a specific version for reproducibility.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6.52"
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+# Merge RanA's required options (BTF, virtiofs, overlayfs, cgroup2, vsock,
+# tracepoints/fentry/BPF) on top of the arch default.
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_RANA_PATH)/board/rana/kernel.fragment"
+# aarch64 kernel image type for vz.
+BR2_LINUX_KERNEL_IMAGE=y
+
+# --- Filesystem images: an ext4 rootfs + initramfs. ------------------------
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+# Keep it tight; the runtime layer + data volume carry the bulk.
+BR2_TARGET_ROOTFS_EXT2_SIZE="48M"
+
+# --- Guest agents: ranad + the guest-side rana service are built OUTSIDE
+#     Buildroot (pure-Go static, cross-compiled) and installed via a
+#     post-build/overlay step wired in the Makefile / a br2-external package.
+#     They are NOT listed as Buildroot packages here (P9: no C build for them).
+
+# --- Explicitly OFF: anything that bloats or is unneeded in a recorder guest.
+# BR2_PACKAGE_* for compilers/interpreters are OFF here — Node/git live in the
+# runtime layer (runtime/build.sh), not the base image.

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  io.rana.vm.plist — launchd template for supervising the RanA macOS guest.
+
+  On macOS there is no native capture path (D2/D15): RanA records what runs
+  inside its Linux guest VM and nothing else. This LaunchAgent keeps the host
+  `rana` process (which boots the guest via Virtualization.framework, streams
+  guest events over vsock, and writes the ledger ON THE HOST) alive across
+  logout/login and restarts it if it crashes.
+
+  This is a TEMPLATE. The paths below are PLACEHOLDERS you must fill in:
+
+    * {{RANA_BINARY}}   -> absolute path to the codesigned `rana` binary,
+                           e.g. /usr/local/bin/rana or the .app bundle path.
+                           The binary MUST be codesigned with the
+                           com.apple.security.virtualization entitlement, or
+                           the guest will not boot (docs/MACOS.md §2).
+    * {{RANA_HOME}}     -> the RanA support dir, typically
+                           ~/Library/Application Support/rana
+
+  Install (per-user LaunchAgent — the ledger is user-owned, never root):
+
+    cp install/io.rana.vm.plist ~/Library/LaunchAgents/io.rana.vm.plist
+    # edit the placeholders, then:
+    launchctl load ~/Library/LaunchAgents/io.rana.vm.plist
+
+  This is a LaunchAgent (per-user), not a LaunchDaemon (root): the guest, the
+  vsock event stream, and the host-written ledger all live at the user's
+  privilege, matching D10. Do NOT install this as a root LaunchDaemon.
+
+  No telemetry, no phone-home, no auto-update (D24) — this only supervises the
+  local guest lifecycle.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.rana.vm</string>
+
+    <!-- The host supervisor: `rana vm supervise` boots/keeps the guest and
+         streams events to the host ledger. Adjust the subcommand to whatever
+         internal/vm + cmd/rana settle on; `vm` is the frozen mac verb (D20). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{RANA_BINARY}}</string>
+        <string>vm</string>
+        <string>supervise</string>
+    </array>
+
+    <!-- Keep the guest supervisor alive; restart on crash. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Do not start automatically at load in the template; the user runs
+         `rana vm start` or flips this to <true/> once configured. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Throttle restart storms. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>WorkingDirectory</key>
+    <string>{{RANA_HOME}}</string>
+
+    <!-- Logs stay local; no remote sink. -->
+    <key>StandardOutPath</key>
+    <string>{{RANA_HOME}}/logs/vm.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{RANA_HOME}}/logs/vm.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

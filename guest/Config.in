@@ -1,0 +1,7 @@
+# Buildroot BR2_EXTERNAL Kconfig entry point for the RanA guest tree.
+#
+# The base-layer guest ships no extra Buildroot *packages* of its own — ranad
+# and the guest-side rana service are pure-Go static binaries cross-compiled
+# outside Buildroot and installed via a rootfs overlay / post-build step (P9:
+# no C build for them). This file exists because Buildroot requires a Config.in
+# in every BR2_EXTERNAL tree; it is intentionally empty of package menus.

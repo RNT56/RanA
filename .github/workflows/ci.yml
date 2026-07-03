@@ -1,0 +1,338 @@
+# RanA continuous integration.
+#
+# Enforces the CONTRACTS matrix and the CLAUDE.md §4 success gates that can be
+# checked in CI (G1 relaxed on CI hardware, G4, G5 strict), the P1–P10
+# invariants that are grep-able, and cross-platform build health.
+#
+# Nothing here phones home, and nothing here runs untrusted release steps —
+# release signing lives in release.yml, gated on tags.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: CI only needs to read the repo. No token can push, comment,
+# or mint an OIDC identity from these jobs.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # gofmt + go vet — formatting and static checks (CLAUDE.md §5 `make lint`).
+  # ---------------------------------------------------------------------------
+  lint:
+    name: gofmt + vet
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt (fails on any non-clean file)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+
+  # ---------------------------------------------------------------------------
+  # build — every OS/arch we ship or dev on must compile.
+  #   * linux binaries are pure-Go static (CGO_ENABLED=0, P9/D3).
+  #   * macos-14 builds the CGO host binary (vz path) for cmd/rana only;
+  #     ranad/verify-standalone are Linux roles, so on darwin we just ensure
+  #     the packages compile.
+  # ---------------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build (linux static)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p bin
+          for cmd in rana ranad rana-verify-standalone; do
+            if [ -d "./cmd/$cmd" ]; then
+              echo "building linux static $cmd"
+              CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o bin/ "./cmd/$cmd"
+            else
+              echo "skip $cmd: ./cmd/$cmd not present yet"
+            fi
+          done
+          # Everything else must at least compile.
+          go build ./...
+      - name: build (darwin host, CGO for vz)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p bin
+          if [ -d ./cmd/rana ]; then
+            CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o bin/rana ./cmd/rana
+          else
+            echo "skip rana: ./cmd/rana not present yet"
+          fi
+          # The rest of the tree must compile on darwin too (CONTRACTS
+          # cross-platform discipline: everything builds on darwin/arm64).
+          go build ./...
+
+  # ---------------------------------------------------------------------------
+  # test — unit + harness tests on the LTS matrix.
+  # ---------------------------------------------------------------------------
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test
+        run: go test ./...
+
+  # ---------------------------------------------------------------------------
+  # race — the race detector on ubuntu-24.04 (CONTRACTS: `go test -race
+  # ./...` must pass). Race builds need CGO, so it is enabled here only.
+  # ---------------------------------------------------------------------------
+  race:
+    name: race (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test -race
+        run: CGO_ENABLED=1 go test -race ./...
+
+  # ---------------------------------------------------------------------------
+  # gates — the CI-enforceable success gates (CLAUDE.md §4).
+  #   G1: writer sustains events/s. Relaxed to >=6000 on CI hardware via
+  #       RANA_G1_MIN_EVPS (the full 10k bar applies on laptop-class hardware
+  #       locally). The ledger bench reads this env threshold and fails below.
+  #   G4: redaction corpus — >=99% recall, zero raw secret in any output.
+  #   G5: chain-mutation suite — 100% of mutations detected.
+  # G4 and G5 are strict on CI (correctness, not throughput).
+  # ---------------------------------------------------------------------------
+  gates:
+    name: gates (G1 relaxed, G4/G5 strict)
+    runs-on: ubuntu-24.04
+    env:
+      # CI hardware is slower/noisier than laptop-class; relax the throughput
+      # floor here. Correctness gates below are NOT relaxed.
+      RANA_G1_MIN_EVPS: "6000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: G1 — writer perf (>= RANA_G1_MIN_EVPS ev/s)
+        run: go test -run=NONE -bench=Sustained -benchmem ./internal/ledger
+      - name: G4 — redaction corpus (>=99% recall, zero secret leak)
+        run: go test -run Corpus ./internal/redact
+      - name: G5 — chain-mutation detection (100%)
+        run: go test ./test/chain-mutations
+
+  # ---------------------------------------------------------------------------
+  # bpf-compile-check — the eBPF C sources must compile to BPF objects, and
+  # bpf2go codegen must run. The compile step is a hard gate. The attach /
+  # harness tests need root + a live kernel + BTF, so they are gated behind
+  # RANA_BPF_TESTS and allowed to be flaky (continue-on-error) — never the
+  # compile.
+  # ---------------------------------------------------------------------------
+  bpf-compile-check:
+    name: bpf compile-check (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install clang / llvm / bpftool headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r) || \
+            sudo apt-get install -y clang llvm libbpf-dev
+      - name: clang -target bpf compile of the C sources (hard gate)
+        run: |
+          if [ ! -d bpf/src ] && [ ! -d internal/bpf/src ]; then
+            echo "no BPF C sources present yet (bpf/src or internal/bpf/src) — skipping"
+            exit 0
+          fi
+          src_dir="bpf/src"
+          [ -d internal/bpf/src ] && src_dir="internal/bpf/src"
+          echo "compiling BPF C sources in $src_dir"
+          shopt -s nullglob
+          found=0
+          for c in "$src_dir"/*.c; do
+            found=1
+            echo "clang -target bpf -c $c"
+            clang -O2 -g -target bpf \
+              -D__TARGET_ARCH_x86 \
+              -I "$src_dir" \
+              -c "$c" -o "/tmp/$(basename "$c" .c).bpf.o"
+          done
+          if [ "$found" = 0 ]; then
+            echo "no *.c files found in $src_dir — skipping (nothing to compile yet)"
+          fi
+      - name: go generate ./internal/bpf (bpf2go)
+        run: |
+          if [ -d ./internal/bpf ]; then
+            go generate ./internal/bpf || echo "go generate produced no output (no //go:generate directives yet)"
+          else
+            echo "internal/bpf not present yet — skipping"
+          fi
+      - name: eBPF harness / attach tests (root + kernel; best-effort)
+        if: env.RANA_BPF_TESTS == '1'
+        continue-on-error: true
+        run: sudo -E env "PATH=$PATH" go test -tags bpf_harness ./internal/bpf/...
+
+  # ---------------------------------------------------------------------------
+  # invariants — the grep-able P1–P10 / §6 code invariants. A hit is a build
+  # failure. These are cheap and catch the highest-severity regressions before
+  # any human review.
+  # ---------------------------------------------------------------------------
+  invariants:
+    name: invariant greps (P2/P3/D10)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # P3 / invariant 1 — no code reads envp or /proc/<pid>/environ.
+      # We scan non-test Go for env-capture patterns. Comments that merely
+      # mention the ban are fine, so match actual reads (function calls /
+      # path literals), not the words in prose.
+      - name: P3 — no envp / environ reads in non-test Go
+        run: |
+          set -o pipefail
+          # Match real reads: /proc/<...>/environ path literals, or reading
+          # the environ/envp symbols. Exclude _test.go and vendored code.
+          hits="$(grep -RInE \
+            '(/proc/[^"]*/environ)|(\benviron\b\s*\[)|(ReadFile\([^)]*environ)|(\benvp\b\s*\[)' \
+            --include='*.go' \
+            --exclude='*_test.go' \
+            cmd internal 2>/dev/null || true)"
+          if [ -n "$hits" ]; then
+            echo "P3 VIOLATION — env capture detected (envp / /proc/*/environ):"
+            echo "$hits"
+            exit 1
+          fi
+          echo "P3 OK: no envp / environ reads found in non-test Go."
+
+      # P2 / invariant 4 — observe-mode BPF programs carry no write/block/
+      # override helpers. Scan the BPF C sources.
+      - name: P2 — no blocking/writing BPF helpers in bpf sources
+        run: |
+          set -o pipefail
+          src_dir=""
+          [ -d bpf/src ] && src_dir="bpf/src"
+          [ -d internal/bpf/src ] && src_dir="internal/bpf/src"
+          if [ -z "$src_dir" ]; then
+            echo "no BPF C sources present yet — nothing to scan."
+            exit 0
+          fi
+          hits="$(grep -RInE \
+            'bpf_probe_write_user|bpf_send_signal|bpf_send_signal_thread|bpf_override_return' \
+            "$src_dir" 2>/dev/null || true)"
+          if [ -n "$hits" ]; then
+            echo "P2 VIOLATION — observe-mode program uses a write/block/override helper:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "P2 OK: no bpf_probe_write_user / bpf_send_signal / bpf_override_return in $src_dir."
+
+      # D10 / §3.4 — the shipped systemd unit must not leave the signing key
+      # world-readable. Assert the unit does not weaken file modes and that no
+      # 0644/0666 mode is applied to a *.key path in the unit or install
+      # script.
+      - name: D10 — signing key path is not world-readable in the unit
+        run: |
+          set -o pipefail
+          unit="install/ranad.service"
+          if [ ! -f "$unit" ]; then
+            echo "no install/ranad.service yet — skipping."
+            exit 0
+          fi
+          # (1) The unit must set a tight UMask. A UMask that grants group/other
+          # read has a 0/1/2/3 in the "other" (last) octet. The correct value
+          # is 0077 (deny group+other everything). Flag any UMask= line whose
+          # last octet is < 4 (i.e. read bit not masked off for other).
+          umask_line="$(grep -InE '^[[:space:]]*UMask=' "$unit" || true)"
+          if [ -z "$umask_line" ]; then
+            echo "D10 VIOLATION — unit sets no UMask; heads.log/socket could be world-readable."
+            exit 1
+          fi
+          # Extract the value and check the last octet is >= 4 (read denied to other).
+          umask_val="$(printf '%s\n' "$umask_line" | sed -E 's/.*UMask=0*([0-7]+).*/\1/')"
+          last_octet="$(printf '%s' "$umask_val" | tail -c 1)"
+          case "$last_octet" in
+            4|5|6|7) : ;;  # read bit masked off for "other" — tight, OK
+            *)
+              echo "D10 VIOLATION — UMask $umask_line permits world read (last octet $last_octet < 4)."
+              exit 1 ;;
+          esac
+          # (2) No *.key path is ever chmod'd world-readable in the unit or the
+          # install script.
+          keybad="$(grep -InE '\.key.*(0644|0666|0777|world|a\+r)' "$unit" install/get-rana.sh 2>/dev/null || true)"
+          if [ -n "$keybad" ]; then
+            echo "D10 VIOLATION — a *.key path is made world-readable:"
+            echo "$keybad"
+            exit 1
+          fi
+          echo "D10 OK: unit UMask is tight ($umask_val) and no world-readable key mode found."
+
+  # ---------------------------------------------------------------------------
+  # cross-build — linux/arm64 static cross-compile. RanA ships amd64 + arm64
+  # Linux binaries; the arm64 target must stay green even when CI runs on
+  # amd64 hosts.
+  # ---------------------------------------------------------------------------
+  cross-build:
+    name: cross-build (linux/arm64 static)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: cross-compile linux/arm64 (pure-Go static)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: arm64
+        run: |
+          mkdir -p bin
+          for cmd in rana ranad rana-verify-standalone; do
+            if [ -d "./cmd/$cmd" ]; then
+              echo "cross-building linux/arm64 $cmd"
+              go build -trimpath -ldflags="-s -w" -o bin/ "./cmd/$cmd"
+            else
+              echo "skip $cmd: ./cmd/$cmd not present yet"
+            fi
+          done
+          go build ./...

@@ -1,0 +1,6 @@
+# Buildroot BR2_EXTERNAL descriptor for the RanA guest tree.
+# Defines the "RANA" external name, which yields the make/kconfig variable
+# BR2_EXTERNAL_RANA_PATH (referenced by configs/rana_guest_defconfig for the
+# kernel fragment path). See guest/README.md.
+name: RANA
+desc: RanA macOS guest base layer (BTF kernel, virtiofs, vsock, cgroup2)

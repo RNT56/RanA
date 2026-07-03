@@ -1,0 +1,28 @@
+RanA deliberately ships NO golangci-lint configuration.
+
+Why this note exists
+--------------------
+A reader looking for `.golangci.yml` / `.golangci.yaml` will find none. That is
+intentional, not an omission. This marker file records the decision so nobody
+"helpfully" adds a golangci-lint config that then diverges from what CI
+actually enforces.
+
+What lint means here
+--------------------
+The project's lint contract (CLAUDE.md §5, CONTRACTS "Everything gofmt-clean,
+go vet clean") is exactly two tools, both run by `make lint` and by the CI
+`lint` job:
+
+  * gofmt -l .   — any file it lists is a failure (formatting is not optional)
+  * go vet ./... — the standard suspicious-construct checks
+
+These are in the Go toolchain itself: no extra binary to install, no version to
+pin, no meta-linter config to drift. For a security/forensics tool the smaller
+the trusted toolchain, the better — golangci-lint would add a large dependency
+surface for marginal benefit over gofmt + vet plus the project's own extensive
+table-driven tests and the grep-able invariant checks in
+.github/workflows/ci.yml (the `invariants` job).
+
+If a golangci-lint config is ever added, it must be additive to — never a
+replacement for — `gofmt -l` and `go vet`, and `make lint` / the CI `lint` job
+must keep enforcing those two directly.

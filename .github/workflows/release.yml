@@ -1,0 +1,179 @@
+# RanA release — reproducible builds, checksums, keyless cosign signatures,
+# and an SBOM, attached to a DRAFT GitHub release on a v* tag.
+#
+# Supply-chain posture is table stakes for a security tool (plan D23/G8):
+#   * reproducible flags: -trimpath, CGO_ENABLED=0 for the Linux binaries.
+#   * SHA256SUMS over every artifact.
+#   * cosign keyless (Sigstore / Fulcio) sign-blob — no long-lived keys; the
+#     signing identity is the GitHub OIDC token, which is why this workflow
+#     needs `id-token: write`.
+#   * SBOM via anchore/sbom-action, with a documented `go version -m` fallback.
+#
+# The release is created as a DRAFT: a human reviews and publishes. Nothing
+# here phones home for the tool itself (D24); these are build-time signatures.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# cosign keyless needs id-token: write (OIDC). Creating/uploading the release
+# needs contents: write. Nothing else.
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    name: reproducible build + checksums
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: derive version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: build static Linux binaries (amd64 + arm64)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          # SOURCE_DATE_EPOCH pins any embedded timestamps for reproducibility.
+          SOURCE_DATE_EPOCH: "1"
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            for cmd in rana ranad rana-verify-standalone; do
+              if [ -d "./cmd/$cmd" ]; then
+                out="dist/${cmd}-linux-${arch}"
+                echo "building $out"
+                GOARCH="$arch" go build -trimpath -ldflags="-s -w -buildid=" \
+                  -o "$out" "./cmd/$cmd"
+              else
+                echo "skip $cmd: ./cmd/$cmd not present yet"
+              fi
+            done
+          done
+          ls -l dist || true
+
+      # macOS host binary (vz path) is CGO + must be Developer-ID codesigned
+      # and notarized with the com.apple.security.virtualization entitlement.
+      # That requires Apple secrets (certificate, notary creds) which are NOT
+      # hardcoded here. When those secrets are configured, add a macos-14
+      # build+codesign+notarize job. Placeholder documented, not stubbed with
+      # fake creds.
+      - name: macOS build note (placeholder — needs Apple secrets)
+        run: |
+          echo "macOS release build is not run here: it needs a codesigning"
+          echo "identity + notarization credentials (Apple secrets), and a"
+          echo "macos-14 runner. See docs/MACOS.md §2. Do NOT hardcode creds."
+
+      - name: SHA256SUMS over all artifacts
+        working-directory: dist
+        run: |
+          if ! ls * >/dev/null 2>&1; then
+            echo "no artifacts built (cmd/ not present yet) — writing empty SHA256SUMS"
+            : > SHA256SUMS
+          else
+            sha256sum * > SHA256SUMS
+          fi
+          cat SHA256SUMS
+
+      - name: upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: warn
+
+  sign-and-release:
+    name: cosign sign + SBOM + draft release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: cosign keyless sign-blob (every artifact + the checksums)
+        working-directory: dist
+        env:
+          COSIGN_YES: "true"
+        run: |
+          shopt -s nullglob
+          for f in *; do
+            # Sign each artifact and the SHA256SUMS. Skip already-produced
+            # signature/cert files.
+            case "$f" in
+              *.sig|*.pem) continue ;;
+            esac
+            echo "cosign sign-blob $f"
+            cosign sign-blob \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "$f"
+          done
+          ls -l
+
+      # SBOM: primary path is anchore/sbom-action (Syft). Documented fallback
+      # if that action is unavailable: `go version -m <binary>` emits the full
+      # module list per binary, which can be captured as a plain-text SBOM:
+      #     for b in dist/*-linux-*; do go version -m "$b"; done > dist/sbom-govm.txt
+      - name: generate SBOM (Syft; go-version-m fallback documented above)
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/
+          format: spdx-json
+          output-file: dist/rana.sbom.spdx.json
+        continue-on-error: true
+
+      - name: SBOM fallback (go version -m) if Syft produced nothing
+        run: |
+          if [ ! -s dist/rana.sbom.spdx.json ]; then
+            echo "Syft SBOM missing — using go version -m fallback"
+            : > dist/sbom-govm.txt
+            for b in dist/*-linux-*; do
+              case "$b" in *.sig|*.pem) continue ;; esac
+              [ -f "$b" ] || continue
+              echo "== $b ==" >> dist/sbom-govm.txt
+              go version -m "$b" >> dist/sbom-govm.txt 2>/dev/null || true
+            done
+            cat dist/sbom-govm.txt || true
+          fi
+
+      - name: create DRAFT release and attach artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: RanA ${{ needs.build.outputs.version }}
+          tag_name: ${{ needs.build.outputs.version }}
+          fail_on_unmatched_files: false
+          body: |
+            RanA ${{ needs.build.outputs.version }} — draft.
+
+            Verify before installing a root daemon (docs/SECURITY.md):
+              * `sha256sum -c SHA256SUMS`
+              * `cosign verify-blob --signature <f>.sig --certificate <f>.pem \
+                   --certificate-identity-regexp '.*' \
+                   --certificate-oidc-issuer https://token.actions.githubusercontent.com <f>`
+
+            Linux binaries are reproducible pure-Go static builds (CGO_ENABLED=0,
+            -trimpath, -buildid=). The macOS host binary is codesigned/notarized
+            separately (needs Apple secrets; see docs/MACOS.md §2) and is not in
+            this draft until that job is configured.
+          files: |
+            dist/*

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RanA — Timeline</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>RanA</h1>
+  <select id="session-picker" aria-label="Session picker"></select>
+  <div id="status"></div>
+</header>
+<main>
+  <section class="panel">
+    <h2>Event river</h2>
+    <div id="river-wrap">
+      <canvas id="river" width="1000" height="260"></canvas>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Run clusters</h2>
+    <div id="clusters"></div>
+  </section>
+  <section class="panel">
+    <h2>Selected event</h2>
+    <div id="detail">Click a marker on the river to inspect it.</div>
+  </section>
+</main>
+<div id="tooltip"></div>
+<script src="/app.js"></script>
+</body>
+</html>

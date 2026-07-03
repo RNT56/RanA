@@ -1,0 +1,128 @@
+# ranad.service — RanA's privileged eBPF collector (D10).
+#
+# THREAT NOTE (required for the root daemon, per CLAUDE.md §3.4 / plan §3.4,
+# docs/ARCHITECTURE.md §2, docs/SECURITY.md).
+#
+# What surface does this touch, and why is it still safe?
+#
+#   ranad is the ONLY root component. It attaches eBPF programs, reads the
+#   ring buffer, redacts (P3), rate-governs (P5), and forwards events over a
+#   single SO_PEERCRED-gated unix socket to the per-user session service. It
+#   has NO listening TCP socket. The valuable artifact — the ledger, the
+#   signing key, the UI — lives at *user* privilege in `rana`, never here.
+#
+#   The hardening below shrinks the root surface to the minimum eBPF needs.
+#   Every directive is chosen so it does NOT break the eBPF/ringbuf/socket
+#   path, and each is annotated with why it is both safe and needed. If a
+#   future change requires relaxing any line, that is a security-relevant
+#   change and needs its own threat note in the PR (CLAUDE.md §3.4).
+#
+#   Same-user-adversary bound (D27): the recorded agent typically runs as the
+#   ledger owner's uid. ranad's one piece of root-owned state — the
+#   append-only checkpoint-head mirror (heads.log) — is what lets
+#   `rana verify --mirror` detect a same-uid rewrite of the user-owned
+#   ledger. That file must remain root-owned and append-only; ProtectSystem
+#   below keeps /var/lib/rana writable only via the explicit ReadWritePaths.
+
+[Unit]
+Description=RanA privileged eBPF collector (ranad)
+Documentation=https://github.com/RNT56/RanA
+# Needs the kernel BPF/tracefs mounts and cgroup2 present before starting.
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ranad
+# Restart on failure so a crash produces a gap{daemon_restart} on re-attach
+# (P5) rather than silent blindness — but never restart on a clean, operator
+# requested stop.
+Restart=on-failure
+RestartSec=1s
+
+# --- Privilege: least caps that eBPF attach + ringbuf + rlimit need --------
+# CAP_BPF (>=5.8): load/attach BPF programs & maps.
+# CAP_PERFMON:     perf/tracepoint attach used by the D7 hook set.
+# CAP_SYS_RESOURCE: raise RLIMIT_MEMLOCK for older kernels / large maps.
+# We drop EVERYTHING else by clearing the bounding set to exactly these.
+# (Kernels <5.8 without CAP_BPF fall back to CAP_SYS_ADMIN — documented in
+# docs/ARCHITECTURE.md §6.1 as an opt-in, NOT the default; do not add it
+# here.)
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE
+# No setuid/setgid transitions can regain privilege.
+NoNewPrivileges=yes
+
+# --- Filesystem: strict, with only the paths ranad legitimately writes -----
+# ProtectSystem=strict makes the entire filesystem read-only except paths in
+# ReadWritePaths. ranad writes only: its datadir (heads.log mirror, D27) and
+# needs the BPF pin directory. /sys is handled by the sandboxing exceptions
+# below.
+ProtectSystem=strict
+# ProtectHome=read-only: ranad never needs to WRITE under /home or /root, but
+# the unix socket / datadir default under /run and /var are outside home. If
+# the socket is ever placed under a home path, add it to ReadWritePaths here
+# (the "socket path exception" from the plan). By default it is not.
+ProtectHome=read-only
+# The only writable paths ranad needs: its root-owned datadir (heads.log) and
+# the runtime dir for the peer-gated unix socket.
+ReadWritePaths=/var/lib/rana /run/rana
+# BPF program pins live here; bpffs must be writable for pinning to survive a
+# restart (idempotent re-attach). This is a kernel virtual fs, not real disk.
+ReadWritePaths=/sys/fs/bpf
+StateDirectory=rana
+RuntimeDirectory=rana
+StateDirectoryMode=0700
+RuntimeDirectoryMode=0700
+# Tighten default file creation so heads.log / socket are never group/world
+# readable (D10: signing key & mirror are not world-readable).
+UMask=0077
+
+# --- Memory: no writable+executable pages ----------------------------------
+# MemoryDenyWriteExecute blocks W^X violations. The cilium/ebpf loader does
+# not JIT userspace code into W+X pages, so this is safe for the pure-Go
+# loader (P9/D4) and removes a classic exploitation primitive.
+MemoryDenyWriteExecute=yes
+
+# --- Network: unix + netlink only, no TCP ----------------------------------
+# ranad speaks ONLY over a local unix socket to the session service, and BPF
+# attach/maps use AF_NETLINK. It never listens on TCP (§3.4). Restricting
+# address families to AF_UNIX + AF_NETLINK enforces "no listening TCP" at the
+# kernel level.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# Belt and suspenders: no IP namespaces are created by ranad.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+# --- General sandboxing knobs (none of these impede eBPF/ringbuf/socket) ---
+ProtectKernelLogs=yes
+# NOTE: ranad DOES need kernel module/tunable access for some attach paths on
+# certain kernels; keep these permissive-but-audited. ProtectKernelTunables
+# is left OFF because BPF sysctl probing under /proc/sys may be needed by the
+# feature-tier detection; revisit per-kernel. ProtectKernelModules stays ON —
+# ranad never loads kernel modules.
+ProtectKernelModules=yes
+ProtectControlGroups=no
+# ^ ranad reads cgroup2 (cgid<->session) so control-group protection must NOT
+#   be strict here; it reads, never mutates foreign cgroups.
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Syscall filtering: allow the common + bpf syscall groups only. @bpf covers
+# bpf(); @system-service is the baseline daemon set. Everything else is
+# blocked (returns EPERM), further shrinking the attack surface.
+SystemCallFilter=@system-service @bpf
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+# Devices: ranad needs no device nodes beyond the defaults.
+DevicePolicy=closed
+PrivateTmp=yes
+PrivateDevices=yes
+# Do NOT set PrivateNetwork=yes — the cgroup/connect sock hooks observe the
+# host network namespace; isolating ranad's netns would blind it.
+
+[Install]
+WantedBy=multi-user.target

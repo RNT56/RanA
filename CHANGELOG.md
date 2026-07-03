@@ -2,6 +2,24 @@
 
 All notable changes to RanA and its binding plan. Format: [Keep a Changelog](https://keepachangelog.com/). Plan amendments are versioned per the plan's own rule (§Status).
 
+## [Plan v1.2] — 2026-07-03 (post-implementation review)
+
+A multi-dimension architecture/robustness/security review of the complete, all-green implementation surfaced fixes and one settled design decision.
+
+### Added / Fixed
+- **Verify gap-summary cross-check (gate G5).** Each segment header's `gap_summary` is now cross-checked against the tally of `gap` events decoded from that segment's own merkle-protected bytes. Closes a hole where a raw-sqlite attacker (no device key) could suppress a recorded gap on the *unattested tail* by recomputing a self-consistent `seg_hash` (signed segments were already protected). New gate case detects it.
+- **`rana verify --mirror` default path.** Now defaults the heads-log to the root-owned `/var/lib/rana/heads.log`, never under `--data` — a same-uid attacker can rewrite `--data`, which would have defeated the D27 custody guarantee entirely.
+- **Wire→ledger `AppendEncoded`.** The svc persists the wire's canonical bytes verbatim (hash the given bytes, don't re-encode — TRUST §7) rather than decode-then-re-encode, which lost the `Redacted` type and tripped the P3 guard on already-redacted data.
+- **Robustness:** ranad DNSCache GC wired; a session cgroup-watch fd/goroutine leak fixed (ctx cancel now interrupts the blocking inotify read); digest worker switched to a size-capped streaming hash; `datasource.Alerts()` reads hashed bytes, not the unhashed `type` mirror column.
+- **P5 fault surfacing:** `service.Config.OnFault` wires decode/persist failures to a logger; `rana run` uses it so a lost event is loud, not silent.
+
+### Decided (v1.2 — the one integration choice the plan left open)
+- **`rana run` hosts the per-user svc in-process** and binds the ranad socket at `<RANA_RUN_DIR>/ranad.sock` (default: the user runtime dir); svc listens, root `ranad` dials, SO_PEERCRED-gated to root (D10). Documented in `docs/ARCHITECTURE.md §3`.
+- **Deferred, documented open items:** multi-user event routing (one root ranad → several users' svc sockets) and a ranad↔svc session-end wire signal to evict finished-session collector state. Until the latter lands, ranad's per-session Governor/segTracker/cgid state grows with the number of distinct sessions over the daemon's uptime (a slow, bounded, documented growth — `LIMITS.md`).
+
+### Note on verification
+Every pure-Go layer and the full wire→svc→ledger→verify→export→standalone-verifier path is race-tested green on darwin; the eBPF collector and the Linux daemon socket lifecycle are compile-verified for `GOOS=linux` (they require generated CO-RE objects + a Linux kernel + root, exercised in CI, not on the dev host).
+
 ## [Plan v1.1] — 2026-07-03
 
 Pre-code amendment: an end-to-end design review found one threat-model hole, one unimplementable mechanism, two verification-breaking spec bugs, and an under-engineered macOS story. All resolved before Phase 0 begins. No code exists yet, so nothing migrates.

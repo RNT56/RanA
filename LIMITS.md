@@ -101,6 +101,27 @@ What RanA *does* protect against, even from a later attacker of either kind: **r
 - No fleet management, multi-user, RBAC, or SIEM export in v1.
 - No cloud sync, no accounts, no telemetry.
 
+## 8. Wiring status (honest current state)
+
+RanA is built as decoupled layers, and not every seam between separate
+processes is wired to its final form yet:
+
+- **`rana run` (Linux) hosts the session service and the full record→ledger→
+  verify→export path is exercised end to end** (the wire→svc→ledger→verify→
+  standalone-verifier flow is race-tested). Actual kernel capture additionally
+  requires `ranad` attached with generated eBPF objects (a Linux/root/CI
+  concern, not runnable on the macOS dev host).
+- **Single-user by design (v1).** One root `ranad` feeding *multiple* users'
+  session services by cgid→uid routing is a documented open item, not built.
+- **Long-lived-daemon session state.** `ranad`'s per-session rate-limit and
+  segment-tracking state is evicted by a session-end signal that is not yet
+  on the ranad↔svc wire, so over a machine's uptime that state grows with the
+  number of *distinct* sessions seen (bounded and slow, not per-event). Closed
+  by the wire-signal item in `CHANGELOG.md` [Plan v1.2].
+
+These are wiring gaps between finished components, not missing guarantees: the
+trust properties in §1 hold for every event that reaches the ledger.
+
 ---
 
 *If any statement here is wrong, that is the highest-priority bug in the project.*

@@ -75,6 +75,20 @@ The split cuts both ways, and RanA accounts for it: the recorded agent usually r
    - Pin `cgid → session` into the BPF filter map.
    - Write `session.start` (profile, host fingerprint: os/kernel/rana-version/boot_id, adopt caveats).
    - `exec` the child inside the scope.
+   - **svc socket contract (v1.2).** `rana run` hosts the per-user session
+     service (svc) *in-process* and binds the ranad socket at
+     `<RANA_RUN_DIR>/ranad.sock` (default: the user runtime dir,
+     `$XDG_RUNTIME_DIR/rana/`). svc is the listener; `ranad` (root) dials it
+     and is SO_PEERCRED-gated to root (D10: "ranad … no listening sockets").
+     `ranad` honors the same `RANA_RUN_DIR`, so a deployment points both at
+     one path. This per-user, single-socket model is the one integration
+     choice the original plan left open; it is settled here for the v1
+     single-user target machine. **Open items** (tracked, not yet built):
+     multi-user routing (one root `ranad` fanning events to several users'
+     svc sockets by cgid→uid), and a session-end signal on the ranad↔svc
+     wire so `ranad` can evict a finished session's Governor/segTracker/cgid
+     state (until then that state is bounded by distinct sessions over the
+     daemon's uptime — a slow, documented growth).
 2. **`rana adopt <target>`** (long-running daemons)
    - Detect the target (e.g. OpenClaw gateway), generate a systemd drop-in placing its unit under `rana.slice`, confirm with the user, restart.
    - `--pid N` migrates a live tree instead; caveats (already-open fds predate the record; thread migration semantics) are written into session metadata honestly.

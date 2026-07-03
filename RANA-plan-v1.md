@@ -2,7 +2,7 @@
 ## Canonical Plan v1.1 — Chain of Custody for AI Agents
 
 **Status:** BINDING. Decisions in §2 are commitments, not options. Changes require a versioned amendment (v1.1, v2) with a changelog entry.
-**Version:** v1.1 (amendment 2026-07-03 — see `CHANGELOG.md`: same-user-adversary custody, file-hook mechanism, escape-detection mechanics, chain/export spec fixes, macOS guest runtime reality).
+**Version:** v1.2 (amendments 2026-07-03 — see `CHANGELOG.md`: v1.1 same-user-adversary custody, file-hook mechanism, escape-detection mechanics, chain/export spec fixes, macOS guest runtime reality; v1.2 post-implementation review — verify gap-summary cross-check, `rana run` svc-hosting + socket contract, robustness/P5 fixes).
 **Date:** 2026-07-03
 **License:** Apache-2.0
 **One-liner:** RanA is the flight recorder for AI agents — a kernel-truth, tamper-evident ledger of everything your agents execute, touch, and contact, across every agent on your machine, with zero configuration.

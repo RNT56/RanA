@@ -98,6 +98,12 @@ type Config struct {
 	// DigestDebounceInterval overrides DigestWorker's default debounce
 	// ticker interval. Zero uses DigestWorker's own default.
 	DigestDebounceInterval time.Duration
+	// OnFault, if set, is called for every non-fatal-to-the-connection
+	// failure to decode or persist an event arriving over the ranad socket
+	// (P5: losses must be loud). A production cmd/ host wires this to a
+	// logger; nil keeps the historical silent-drop behavior (used only by
+	// tests that assert on the returned error directly). It must not block.
+	OnFault func(error)
 }
 
 // ErrNilProfile is returned by NewService when cfg.Profile is nil.
@@ -194,18 +200,16 @@ func NewService(cfg Config) (*Service, error) {
 	}
 	svc.alertEngine = engine
 
-	// KNOWN GAP (P5): OnDecodeError is intentionally left nil here today —
-	// there is no logger/fault-sink dependency in this package yet, and no
-	// cmd/ entry point wires a *Service into a running process to own that
-	// decision. Until one is added, a fatal ledger.Writer commit error (see
-	// ledger.Writer.Err's doc comment) surfaces only as a per-call error
-	// return from AppendEncoded/Append; every subsequent kernel/marker/
-	// digest event then silently fails to append with no log and no gap
-	// event. This must be closed before svc is wired into a production
-	// cmd/ host process.
+	// P5: a failure to decode or persist a kernel event over the ranad
+	// socket is surfaced to cfg.OnFault (a production cmd/ host, e.g.
+	// `rana run`, wires this to a logger so a fatal ledger.Writer commit
+	// error — see ledger.Writer.Err — is loud, not a silent drop). nil
+	// preserves the historical error-return-only behavior for tests that
+	// assert directly on the returned error.
 	svc.ranadServer = NewRanadServer(RanadServerConfig{
 		Appender:       appenderFunc(svc.appendKernelEvent),
 		RequirePeerUID: cfg.RequireRanadUID,
+		OnDecodeError:  cfg.OnFault,
 	})
 
 	host, err := NewTimelineHost(TimelineHostConfig{Token: cfg.LaunchToken, DataSource: ds})

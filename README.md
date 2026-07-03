@@ -17,13 +17,15 @@
 <img src="https://img.shields.io/badge/ledger-signed%20%26%20verifiable-1E6FE0" alt="Signed and verifiable ledger">
 </p>
 
+<sub>◆ &nbsp; kernel truth &nbsp; ◆ &nbsp; effects, not thoughts &nbsp; ◆ &nbsp; secret-free by construction &nbsp; ◆</sub>
+
 </div>
 
 ---
 
 RanA records what an AI agent *did to your machine* &mdash; every process it ran, every file it wrote, every credential it read, every host it contacted &mdash; and writes it into a hash-chained, signed ledger you can verify, export, and browse. It reads the kernel, so it sees through first-party sandboxes and works the same for Claude Code, Codex, OpenClaw, and anything you build yourself.
 
-It does not read prompts or completions. It records **effects, not thoughts**.
+It never reads prompts or completions. It records **effects, not thoughts**.
 
 ```text
 Already running OpenClaw?
@@ -46,14 +48,14 @@ None of them answer the question you actually have the morning after:
 
 Walls are per-vendor and per-mode. Claude Code sandboxes Claude Code. Codex sandboxes Codex. OpenClaw ships an `elevated` bypass by design. Nothing watches across agents, and nothing records what the walls themselves let through. Prevention without memory means every incident review starts from zero &mdash; and personal agents fail quietly:
 
-- **Cline, Feb 2026** (5M+ users): a prompt-injection chain exfiltrated npm release tokens and published a malicious package.
-- **OpenClaw CIK evaluation** (arXiv 2604.04759): the most-deployed personal agent runs with full local access to Gmail, Stripe, and the filesystem.
+- **Cline, Feb 2026** (5M+ users) &mdash; a prompt-injection chain exfiltrated npm release tokens and published a malicious package.
+- **OpenClaw CIK evaluation** (arXiv 2604.04759) &mdash; the most-deployed personal agent runs with full local access to Gmail, Stripe, and the filesystem.
 
-RanA's answer is kernel truth: an eBPF collector records every `exec`, write-intent file op, network flow, and credential-file read attributable to an agent session; a non-optional redaction stage strips secrets before anything is written; the result lands in a hash-chained, Merkle-segmented, Ed25519-signed ledger you can `verify`, `export`, and browse locally.
+RanA's answer is kernel truth: an eBPF collector records every `exec`, write-intent file op, network flow, and credential-file read attributable to an agent session &rarr; a non-optional redaction stage strips secrets before anything is written &rarr; the result lands in a hash-chained, Merkle-segmented, Ed25519-signed ledger you can `verify`, `export`, and browse locally.
 
 ## What RanA is, and is not
 
-| RanA is | RanA is not |
+| ✓ &nbsp; RanA is | ✗ &nbsp; RanA is not |
 |---|---|
 | A cross-agent flight recorder | A sandbox or firewall (v1) |
 | Kernel-truth (eBPF), not agent self-report | An MCP wire proxy or TLS interceptor |
@@ -65,7 +67,7 @@ The **effects-not-thoughts** line is both a privacy stance and a scope boundary:
 
 ## Quickstart
 
-Install (one static binary plus a privileged collector; on macOS the Linux guest image is embedded):
+Install &mdash; one static binary plus a privileged collector; on macOS the Linux guest image is embedded:
 
 ```sh
 # Linux (kernel 5.15+, cgroup v2) or macOS 13+ (Apple Silicon)
@@ -75,7 +77,7 @@ curl -fsSL https://get.rana.dev | sh
 rana doctor
 ```
 
-Record any agent for one run:
+▸ &nbsp;**Record any agent for one run**
 
 ```sh
 rana run --profile claude-code -- claude
@@ -83,14 +85,14 @@ rana run --profile claude-code -- claude
 rana timeline            # opens a localhost UI, token-gated
 ```
 
-Adopt a long-running agent (the hero path):
+▸ &nbsp;**Adopt a long-running agent** (the hero path)
 
 ```sh
 rana adopt openclaw      # slots the gateway and all its children into one session
-rana timeline            # watch "conversation to consequences" live
+rana timeline            # watch conversation → consequences, live
 ```
 
-Prove the record was not touched:
+▸ &nbsp;**Prove the record was not touched**
 
 ```sh
 rana verify              # recomputes the whole chain; seconds even at millions of events
@@ -107,27 +109,32 @@ rana export --session <id> out/     # portable proof pack a third party can veri
 One **cgroup v2 leaf per session** is the attribution primitive: an agent's entire process tree &mdash; a gateway spawning sub-agents spawning tool processes &mdash; is captured by kernel inheritance, which is why cross-agent works for free.
 
 ```text
-   agent process tree  --  cgroup: rana.slice/rana-<session>.scope
-          |
-   [kernel] eBPF  (exec / file / connect / sensitive-read)
-          |  ring buffer
-   ranad (root)   decode  ->  REDACT secrets  ->  rate-govern
-          |  unix socket, peer-authenticated
-   rana session service (your user)
-          |
-          +--  SQLite ledger + hash chain + Ed25519 checkpoints
-          +--  content-digest worker (profile scopes only)
-          +--  localhost timeline UI
+   agent process tree ── cgroup: rana.slice/rana-<session>.scope
+          │
+   ┌──────┴──────────────────────────────────────────────────┐
+   │ [kernel] eBPF   exec · file · connect · sensitive-read  │
+   └──────┬──────────────────────────────────────────────────┘
+          │ ring buffer
+   ┌──────┴──────────────────────────────────────────────────┐
+   │ ranad (root)    decode → REDACT secrets → rate-govern   │
+   └──────┬──────────────────────────────────────────────────┘
+          │ unix socket, peer-authenticated
+   ┌──────┴──────────────────────────────────────────────────┐
+   │ rana session service (your user)                        │
+   │   ▸ SQLite ledger + hash chain + Ed25519 checkpoints    │
+   │   ▸ content-digest worker (profile scopes only)         │
+   │   ▸ localhost timeline UI                               │
+   └─────────────────────────────────────────────────────────┘
 ```
 
 The collector is inert by construction: no hook can block, delay, or modify a syscall. If `ranad` dies, your agents keep running &mdash; the missing window becomes a visible `gap` event, never a silent hole. See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
 ## Trust, briefly
 
-- **Integrity after persistence** &mdash; any edit, deletion, reorder, or wholesale session removal is detected by `rana verify`.
-- **Secret-freedom** &mdash; environment values are never captured; every other string is redacted before it is hashed. See [`docs/REDACTION.md`](./docs/REDACTION.md).
-- **Inertness** &mdash; observe mode cannot alter or break your agent.
-- **Portable proof** &mdash; the chain spec and a standalone verifier are documented in [`docs/TRUST.md`](./docs/TRUST.md); an export verifies with no RanA installed.
+- **Integrity after persistence** &rarr; any edit, deletion, reorder, or wholesale session removal is detected by `rana verify`.
+- **Secret-freedom** &rarr; environment values are never captured; every other string is redacted before it is hashed. See [`docs/REDACTION.md`](./docs/REDACTION.md).
+- **Inertness** &rarr; observe mode cannot alter or break your agent.
+- **Portable proof** &rarr; the chain spec and a standalone verifier are documented in [`docs/TRUST.md`](./docs/TRUST.md); an export verifies with no RanA installed.
 
 And the honest limits are in [`LIMITS.md`](./LIMITS.md). Read them.
 
@@ -143,14 +150,14 @@ Native macOS process recording needs Endpoint Security entitlements Apple grants
 
 - **One static binary per host role.** No Python, Node, or Docker runtime dependency. Pure-Go SQLite and a pure-Go eBPF loader; the only CGO is the macOS host binary.
 - **Reproducible builds**, cosign-signed release artifacts, and an SBOM from the first release. No phone-home, no background update check.
-- **Strict TDD, gate-enforced.** Ledger sustains 10k+ events/second with zero loss; redaction holds 99%+ recall on a permanent seeded-secret corpus; `verify` detects 100% of a chain-mutation suite. These are regression gates, not one-time checks.
+- **Strict TDD, gate-enforced.** Ledger sustains 10k+ events/second with zero loss · redaction holds 99%+ recall on a permanent seeded-secret corpus · `verify` detects 100% of a chain-mutation suite. These are regression gates, not one-time checks.
 
 ## Documentation
 
 - [`RANA-plan-v1.md`](./RANA-plan-v1.md) &mdash; the binding plan: principles, decisions, roadmap, gates
-- Core specs: [`ARCHITECTURE`](./docs/ARCHITECTURE.md), [`THREAT-MODEL`](./docs/THREAT-MODEL.md), [`TRUST`](./docs/TRUST.md) (chain and verifier), [`REDACTION`](./docs/REDACTION.md)
+- Core specs &mdash; [`ARCHITECTURE`](./docs/ARCHITECTURE.md) · [`THREAT-MODEL`](./docs/THREAT-MODEL.md) · [`TRUST`](./docs/TRUST.md) · [`REDACTION`](./docs/REDACTION.md)
 - [`docs/OPENCLAW.md`](./docs/OPENCLAW.md) &mdash; the adopt flow and causality explainer
-- Platform and process: [`MACOS`](./docs/MACOS.md), [`PROFILES`](./docs/PROFILES.md), [`SECURITY`](./docs/SECURITY.md), [`CONTRIBUTING`](./CONTRIBUTING.md)
+- Platform and process &mdash; [`MACOS`](./docs/MACOS.md) · [`PROFILES`](./docs/PROFILES.md) · [`SECURITY`](./docs/SECURITY.md) · [`CONTRIBUTING`](./CONTRIBUTING.md)
 
 ## License
 
@@ -160,5 +167,7 @@ Apache-2.0. DCO sign-off required; no CLA. Security disclosures: see [`docs/SECU
 <br>
 <img src="assets/logo/RanA.png" alt="RanA" width="80">
 <br>
-<sub><strong>Nothing was blocked that shouldn't have been. Nothing happened that wasn't recorded. Nothing left that wasn't seen. And every byte of proof belongs to you.</strong></sub>
+<sub><em>rana</em> is Latin for frog. It sits on the lilypad. It sees everything. It does not interfere.</sub>
+<br><br>
+<sub><strong>Nothing was blocked that shouldn't have been · Nothing happened that wasn't recorded · Nothing left that wasn't seen · And every byte of proof belongs to you.</strong></sub>
 </div>

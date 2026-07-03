@@ -24,7 +24,7 @@ func newFakeAppender() *fakeAppender {
 	return &fakeAppender{mu: make(chan struct{}, 1)}
 }
 
-func (f *fakeAppender) Append(ev schema.Event) error {
+func (f *fakeAppender) AppendEncoded(ev schema.Event, _ []byte) error {
 	f.mu <- struct{}{}
 	defer func() { <-f.mu }()
 	f.events = append(f.events, ev)

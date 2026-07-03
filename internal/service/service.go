@@ -216,11 +216,22 @@ type clockAdapter struct{ c Clock }
 
 func (a clockAdapter) Now() time.Time { return a.c.Now() }
 
-// appenderFunc adapts a plain func(schema.Event) error to the Appender
-// interface RanadServer expects.
-type appenderFunc func(schema.Event) error
+// appendEncodedAndPublish is appendAndPublish for kernel events arriving over
+// the wire: it persists the canonical bytes verbatim (no re-encode — see
+// ledger.Writer.AppendEncoded) and republishes to the live tail.
+func (s *Service) appendEncodedAndPublish(ev schema.Event, enc []byte) error {
+	if err := s.writer.AppendEncoded(ev, enc); err != nil {
+		return err
+	}
+	s.ds.PublishLive(ev)
+	return nil
+}
 
-func (f appenderFunc) Append(ev schema.Event) error { return f(ev) }
+// appenderFunc adapts a plain func to the Appender
+// interface RanadServer expects.
+type appenderFunc func(ev schema.Event, enc []byte) error
+
+func (f appenderFunc) AppendEncoded(ev schema.Event, enc []byte) error { return f(ev, enc) }
 
 // redactionOptionsFor builds the redact.Option set implied by a profile's
 // [redaction] table (docs/PROFILES.md: extra patterns are additive,
@@ -277,8 +288,8 @@ func (s *Service) appendAndPublish(ev schema.Event) error {
 // kernel-origin event from ranad is persisted, published to the live tail,
 // AND observed by the alert engine (post-persist, per
 // alerts.Engine.Observe's contract).
-func (s *Service) appendKernelEvent(ev schema.Event) error {
-	if err := s.appendAndPublish(ev); err != nil {
+func (s *Service) appendKernelEvent(ev schema.Event, enc []byte) error {
+	if err := s.appendEncodedAndPublish(ev, enc); err != nil {
 		return err
 	}
 	return s.alertEngine.Observe(ev, ev.Seg)

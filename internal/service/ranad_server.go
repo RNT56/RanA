@@ -18,8 +18,16 @@ import (
 // on: accept an already-decoded schema.Event for persistence. Depending on
 // this narrow interface (rather than *ledger.Writer directly) keeps the
 // server unit-testable against a fake without spinning up SQLite.
+// Appender persists events arriving over the ranad socket. The wire delivers
+// each event's canonical CBOR bytes already redacted and guard-checked by
+// ranad (cborcanon.EncodeEvent ran upstream before the wire), so the svc hands
+// those exact bytes to the ledger rather than decode-and-re-encode:
+// re-encoding would lose the redact.Redacted type on every string field and
+// spuriously reject already-redacted data. AppendEncoded takes the decoded
+// envelope (for indexing) plus the original canonical bytes (to hash and
+// store), matching docs/TRUST.md §7's "hash the given bytes, do not re-encode".
 type Appender interface {
-	Append(ev schema.Event) error
+	AppendEncoded(ev schema.Event, enc []byte) error
 }
 
 // ErrWrongHelloRole is returned by HandleConn when the peer's Hello frame
@@ -237,7 +245,11 @@ func (s *RanadServer) appendEv(f *wire.Ev) error {
 	if err := decodeEventFrame(f.Event, &ev); err != nil {
 		return fmt.Errorf("service: decoding Ev frame: %w", err)
 	}
-	if err := s.cfg.Appender.Append(ev); err != nil {
+	// Persist the wire's canonical bytes verbatim — do not re-encode (see
+	// Appender's doc comment: re-encoding loses the redact.Redacted type and
+	// would reject already-redacted data). f.Event is exactly the bytes ev
+	// was just decoded from.
+	if err := s.cfg.Appender.AppendEncoded(ev, f.Event); err != nil {
 		return fmt.Errorf("service: appending kernel event to ledger: %w", err)
 	}
 	return nil

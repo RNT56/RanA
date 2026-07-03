@@ -284,6 +284,45 @@ func (w *Writer) Append(ev schema.Event) error {
 	}
 }
 
+// AppendEncoded persists an event whose canonical CBOR bytes were produced
+// upstream (by ranad, which ran the redaction pipeline and cborcanon.EncodeEvent
+// — including the P3 raw-string guard — before putting the bytes on the wire).
+// The svc side must NOT re-encode such an event: CBOR text strings decode back
+// to plain Go strings (losing the redact.Redacted type), so a re-encode would
+// spuriously trip ErrRawString on already-redacted data. Instead this hashes
+// the provided bytes directly, exactly as docs/TRUST.md §7 prescribes ("hash
+// the given bytes, do not re-encode").
+//
+// enc is verified to be well-formed canonical CBOR (so a malformed upstream
+// cannot poison the chain with bytes that later fail verification), and ev is
+// the already-decoded envelope used only for the ledger's indexing/segment
+// bookkeeping — it MUST be the decoding of enc (the caller just produced it
+// from enc). Redaction is NOT re-applied here; the bytes are trusted to be
+// pre-redacted, which for the kernel-event path is guaranteed by ranad.
+func (w *Writer) AppendEncoded(ev schema.Event, enc []byte) error {
+	if err := w.Err(); err != nil {
+		return fmt.Errorf("ledger: writer has a fatal commit error, refusing further writes: %w", err)
+	}
+	if err := schema.Validate(ev); err != nil {
+		return fmt.Errorf("ledger: invalid event: %w", err)
+	}
+	ok, err := cborcanon.IsCanonical(enc)
+	if err != nil {
+		return fmt.Errorf("ledger: checking event bytes: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("ledger: refusing non-canonical event bytes from the wire")
+	}
+	leaf := chain.Leaf(enc)
+	pe := pendingEvent{ev: ev, enc: enc, leaf: leaf}
+	select {
+	case w.queue <- pe:
+		return nil
+	case <-w.closeCh:
+		return ErrWriterClosed
+	}
+}
+
 // Err returns the first commit-time error encountered by the writer
 // goroutine, if any (nil while the writer is healthy). Once set, Append
 // refuses further writes (returning a wrapped form of this error) rather

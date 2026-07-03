@@ -1,0 +1,48 @@
+# RanA profile: claude-code
+# Anthropic's Claude Code CLI. Typically a repo-scoped coding agent.
+
+[profile]
+name        = "claude-code"
+description = "Claude Code CLI — repo-scoped coding agent."
+version     = 1
+
+[match]
+auto = true
+# Heuristic identification when adopting/attaching without an explicit profile.
+exe_basename = ["claude"]
+argv_contains = ["claude-code"]
+# Note: Claude Code may run under its own /sandbox. RanA observes it regardless —
+# the sandbox runs on the same kernel, so eBPF sees through it. Observing a
+# sandboxed agent is a recommended recipe (see docs/ARCHITECTURE.md, P8).
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true
+
+[digest]
+# Coding agents earn their keep on the working tree, so before/after content
+# digests here are high-value. Default to the cwd the session started in.
+scopes = ["$SESSION_CWD/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**"]
+
+[sensitive_read]
+extra = [
+  "~/.config/gh/**",          # gh CLI tokens a coding agent might reach for
+  "~/.npmrc",                 # npm auth (the Cline incident class)
+  "~/.cargo/credentials*",
+  "~/.pypirc",
+]
+
+[markers]
+enabled = false               # no first-party marker channel; causality via process tree + time
+
+[timeline]
+lens = "tree"                 # process tree reads naturally for a coding session
+
+[retention]
+ttl_days = 30

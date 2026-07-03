@@ -1,0 +1,22 @@
+# OS noise
+.DS_Store
+
+# Build outputs
+/bin/
+/dist/
+*.o
+*.test
+
+# Go
+/vendor/
+
+# bpf2go generated objects are produced by `make gen` in CI
+internal/bpf/*_bpfel*.go
+internal/bpf/*_bpfeb*.go
+internal/bpf/*.o
+
+# UI build artifacts (bundle is checked in; intermediates are not)
+internal/ui/node_modules/
+
+# Local scratch
+/spikes/local/

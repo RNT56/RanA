@@ -1,0 +1,41 @@
+# RanA profile: codex
+# OpenAI Codex CLI. Ships Landlock + seccomp sandboxing by default on Linux.
+
+[profile]
+name        = "codex"
+description = "OpenAI Codex CLI — coding agent with default Landlock+seccomp sandbox."
+version     = 1
+
+[match]
+auto = true
+exe_basename = ["codex"]
+# Codex's own Landlock sandbox restricts what it CAN do; RanA records what it
+# DID do, at the kernel layer beneath Landlock. Complementary, not redundant.
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true
+
+[digest]
+scopes = ["$SESSION_CWD/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**"]
+
+[sensitive_read]
+extra = [
+  "~/.config/gh/**",
+  "~/.npmrc",
+]
+
+[markers]
+enabled = false
+
+[timeline]
+lens = "tree"
+
+[retention]
+ttl_days = 30

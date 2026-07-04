@@ -178,8 +178,10 @@ func (e *Enricher) EnrichExec(rec ExecRecord, seg uint64) (schema.Event, error) 
 
 	argv := e.pipeline.RedactArgv(rec.Argv)
 	comm := e.pipeline.Redact(rec.Comm)
-	cwd := e.pipeline.RedactPath(rec.Cwd)
-	exePath := e.pipeline.RedactPath(rec.ExePath)
+	// cwd and the exe path are kernel-resolved (the task's fs->pwd and
+	// mm->exe_file walks), so the content-addressed allowlist may apply.
+	cwd := e.pipeline.RedactPath(rec.Cwd, redact.PathResolved)
+	exePath := e.pipeline.RedactPath(rec.ExePath, redact.PathResolved)
 
 	ev := schema.NewProcExec(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid,
 		argv, comm, cwd, exePath, rec.Ppid, rec.Uid)
@@ -253,6 +255,17 @@ func fsPathSource(ps PathSourceKind) schema.PathSource {
 	return schema.PathSourceResolved
 }
 
+// pathTrust maps a record's kernel path-provenance to the redaction pipeline's
+// PathTrust, which decides whether the content-addressed allowlist may apply.
+// Only a kernel-resolved path is trusted; anything else (claimed, or an
+// unrecognized value) defaults to the safe PathClaimed (no allowlist).
+func pathTrust(ps PathSourceKind) redact.PathTrust {
+	if ps == PathSourceKindResolved {
+		return redact.PathResolved
+	}
+	return redact.PathClaimed
+}
+
 // EnrichFsOp builds the matching fs.* event from a decoded FsOpRecord,
 // dispatching on rec.Op.
 func (e *Enricher) EnrichFsOp(rec FsOpRecord, seg uint64) (schema.Event, error) {
@@ -268,7 +281,12 @@ func (e *Enricher) EnrichFsOp(rec FsOpRecord, seg uint64) (schema.Event, error) 
 	}
 	idx := e.nextIdxFor(session)
 
-	path := e.pipeline.RedactPath(rec.Path)
+	// The allowlist that spares content-hash-shaped segments is trusted only
+	// when the kernel RESOLVED this path; a claimed (agent-influenced) path
+	// gets no allowlist, so a crafted …/objects/<hex-secret> segment is
+	// redacted. path_source is the same kernel-truth signal stamped on the
+	// event itself.
+	path := e.pipeline.RedactPath(rec.Path, pathTrust(rec.PathSource))
 	pathSource := fsPathSource(rec.PathSource)
 
 	switch rec.Op {
@@ -277,7 +295,7 @@ func (e *Enricher) EnrichFsOp(rec FsOpRecord, seg uint64) (schema.Event, error) 
 	case FsOpUnlink:
 		return schema.NewFsUnlink(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid, path, pathSource), nil
 	case FsOpRename:
-		path2 := e.pipeline.RedactPath(rec.Path2)
+		path2 := e.pipeline.RedactPath(rec.Path2, pathTrust(rec.PathSource))
 		return schema.NewFsRename(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid, path, path2, pathSource), nil
 	case FsOpMkdir:
 		return schema.NewFsMkdir(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid, path, pathSource, rec.Mode), nil
@@ -397,7 +415,9 @@ func (e *Enricher) EnrichUnixConnect(rec UnixConnectRecord, seg uint64) (schema.
 		return schema.Event{}, err
 	}
 	idx := e.nextIdxFor(session)
-	path := e.pipeline.RedactPath(rec.Path)
+	// A unix-socket connect address is the sockaddr_un the agent asked to
+	// connect to — syscall-argument-derived, i.e. claimed. No allowlist.
+	path := e.pipeline.RedactPath(rec.Path, redact.PathClaimed)
 	return schema.NewUnixConnect(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid, path), nil
 }
 

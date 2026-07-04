@@ -157,7 +157,7 @@ func TestContextualAllowlistDoesNotBypassRealSecret(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			out := string(p.RedactPath(c.path))
+			out := string(p.RedactPath(c.path, PathResolved))
 			if strings.Contains(out, c.secret) {
 				t.Errorf("contextual allowlist bypassed real structural secret\n  path: %q\n  secret: %q\n  out: %q", c.path, c.secret, out)
 			}
@@ -260,7 +260,7 @@ func TestWindowsStylePathSegments(t *testing.T) {
 	p := testPipeline(t)
 	secret := xs("MyonIGQsPDQ/MT1jTyoqbCY1NTc=")
 	raw := `C:\Users\dev\config\` + secret + `\file.txt`
-	out := string(p.RedactPath(raw))
+	out := string(p.RedactPath(raw, PathResolved))
 	if strings.Contains(out, secret) {
 		t.Errorf("secret leaked in backslash-separated path: %q", out)
 	}
@@ -329,7 +329,7 @@ func TestRedactArgvNilAndEmptySlice(t *testing.T) {
 // returns empty.
 func TestRedactPathEmptyString(t *testing.T) {
 	p := testPipeline(t)
-	if out := p.RedactPath(""); out != "" {
+	if out := p.RedactPath("", PathResolved); out != "" {
 		t.Errorf("RedactPath(\"\") = %q, want empty", out)
 	}
 }

@@ -646,3 +646,10 @@
 {"input":"/nix/store/objects/aee0adc5b8c27b52d527317dff38af371598ce5b3d3ee5d1337425486cde9d81","spans":[],"must_redact":false,"kind":"path"}
 {"input":"/home/user/project/src/main.go","spans":[],"must_redact":false,"kind":"path"}
 {"input":"/var/cache/12345678-1234-1234-1234-123456789abc/data","spans":[],"must_redact":false,"kind":"path"}
+{"enc":"xb64","input":"XRIcFwIHDgYRWhxPEgoRWRhKHRcACgNIBgkRERMWTxkNFx1aV0pGVFhWFVoOEBMRFktIXkAeX1BPRQ==","secrets":["FgQPBU8GChQTFBVIGg4QSFtUS0FVW1caW1YTEhYXSB5fQx9YUUxEVg=="],"spans":[{"class":"entropy"}],"must_redact":true,"kind":"path","path_source":"claimed"}
+{"enc":"xb64","input":"XQIPAkUGQBEfGB5EDBxdFA1dTxZRVlAVW1sRRxFFGEEOQEsOBBhCAltUTAdfQ0UUQE8eWxQcCVdWEA0BAw==","secrets":["SwdWV0lTV0NITUdOTwtEGFIESxQEDwAdAFpHERFDHE0OQU8NUR9DA1w="],"spans":[{"class":"entropy"}],"must_redact":true,"kind":"path","path_source":"claimed"}
+{"enc":"xb64","input":"XRUDEQIbQB0SHxZODBxdTAlKGhYECFEcUVxGRUNEFUEOEE4PAB9CUFxSGVZZRUhMEk8bCxdLW1Q=","secrets":["EQULBx1SXUFEQEUaQFYTTwgBHBRRX1MeV1pER01KTBoMFkgNVUg="],"spans":[{"class":"entropy"}],"must_redact":true,"kind":"path","path_source":"claimed"}
+{"input":"/home/u/repo/.git/objects/ab/cdef0123456789abcdef0123456789abcdef01","spans":[],"must_redact":false,"kind":"path","path_source":"resolved"}
+{"input":"/var/lib/store/objects/deadbeefcafebabe0123456789abcdef01234567","spans":[],"must_redact":false,"kind":"path","path_source":"resolved"}
+{"input":"/tmp/session/user-config.json","spans":[],"must_redact":false,"kind":"path","path_source":"claimed"}
+{"input":"/home/dev/project/src/handler.go","spans":[],"must_redact":false,"kind":"path","path_source":"claimed"}

@@ -56,7 +56,7 @@ func TestPipelineConcurrentRedactIsRaceFreeAndDeterministic(t *testing.T) {
 				// they share the same Pipeline and its compiled pattern
 				// set/salt.
 				_ = p.RedactArgv(inputs)
-				_ = p.RedactPath("/tmp/upload/" + strings20("Q"))
+				_ = p.RedactPath("/tmp/upload/"+strings20("Q"), PathResolved)
 			}
 		}()
 	}

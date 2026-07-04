@@ -58,10 +58,15 @@ func FuzzRedact(f *testing.F) {
 			t.Fatalf("RedactArgv not idempotent: raw=%q once=%q twice=%q", raw, argvOnce[0], argvTwice[0])
 		}
 
-		pathOnce := p.RedactPath(raw)
-		pathTwice := p.RedactPath(string(pathOnce))
-		if pathOnce != pathTwice {
-			t.Fatalf("RedactPath not idempotent: raw=%q once=%q twice=%q", raw, pathOnce, pathTwice)
+		// RedactPath must be idempotent under BOTH trust levels (the claimed
+		// path disables the content-addressed allowlist; the resolved path
+		// applies it — both must reach a fixed point).
+		for _, trust := range []PathTrust{PathClaimed, PathResolved} {
+			pathOnce := p.RedactPath(raw, trust)
+			pathTwice := p.RedactPath(string(pathOnce), trust)
+			if pathOnce != pathTwice {
+				t.Fatalf("RedactPath not idempotent (trust=%d): raw=%q once=%q twice=%q", trust, raw, pathOnce, pathTwice)
+			}
 		}
 
 		// Leak-oriented property: a canonical, unambiguous secret (the AWS

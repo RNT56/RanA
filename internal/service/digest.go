@@ -289,7 +289,10 @@ func (w *DigestWorker) maybeDigest(p string, st *fileState, size int64, now time
 		prevSize = st.settledSize
 	}
 
-	redactedPath := w.cfg.Pipeline.RedactPath(p)
+	// The digest worker only ever redacts paths of files it actually scanned
+	// and hashed on disk, so the path is resolved (the file exists here); the
+	// content-addressed allowlist may apply.
+	redactedPath := w.cfg.Pipeline.RedactPath(p, redact.PathResolved)
 	ev := schema.NewFsSettle(w.cfg.Session, 0, 0, uint64(now.UnixNano()), uint64(now.UnixNano()), 0,
 		redactedPath, prevDigest, digest, size-prevSize, uint64(now.UnixNano()))
 

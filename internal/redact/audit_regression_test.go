@@ -145,6 +145,41 @@ func TestAuditRegression_StricterEntropyZeroValue(t *testing.T) {
 	}
 }
 
+// TestAuditRegression_PathProvenanceGatesAllowlist covers the path-context
+// allowlist blind spot, resolved via kernel provenance: the SAME
+// hash-shaped path segment is spared when the path is kernel-RESOLVED (a real
+// content hash, must not be shredded) but REDACTED when the path is
+// agent-CLAIMED (a segment an attacker crafted to smuggle a secret past
+// redaction). This is what makes the allowlist safe without the ~18% precision
+// loss that tightening its shape rules would cause.
+func TestAuditRegression_PathProvenanceGatesAllowlist(t *testing.T) {
+	p := auditPipeline(t)
+	// A 40-hex segment under an "objects" directory — indistinguishable by
+	// shape from a real git/nix content hash.
+	const hexSecret = "deadbeefcafebabe0123456789abcdef01234567"
+	path := "/tmp/cache/objects/" + hexSecret
+
+	// Resolved: the kernel vouches this file exists here → allowlisted, spared.
+	if out := string(p.RedactPath(path, PathResolved)); out != path {
+		t.Errorf("resolved content-hash path should be spared, got %q", out)
+	}
+	// Claimed: agent-influenced → no allowlist → the crafted secret is redacted.
+	out := string(p.RedactPath(path, PathClaimed))
+	if strings.Contains(out, hexSecret) {
+		t.Errorf("claimed crafted-hash secret leaked: %q", out)
+	}
+	if out == path {
+		t.Errorf("claimed crafted-hash path was not redacted at all: %q", out)
+	}
+
+	// The zero value of PathTrust is the safe default (PathClaimed): a caller
+	// that forgets to vouch for provenance gets the stricter behavior.
+	var zero PathTrust
+	if zero != PathClaimed {
+		t.Errorf("zero-value PathTrust = %d, want PathClaimed (safe default)", zero)
+	}
+}
+
 // TestAuditRegression_PEMBlockFullyRedacted covers pem-body-tail-line-leaks:
 // the entire private-key block (including the short final wrapped line) must
 // be redacted, not just the BEGIN header.

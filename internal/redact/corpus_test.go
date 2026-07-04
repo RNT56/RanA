@@ -49,6 +49,11 @@ type corpusRow struct {
 	// allowlisting applies), anything else (including empty/omitted)
 	// routes through Pipeline.Redact.
 	Kind string `json:"kind,omitempty"`
+	// PathSource, for Kind=="path" rows, selects the RedactPath trust: absent
+	// or "resolved" applies the content-addressed allowlist (a kernel-resolved
+	// real path); "claimed" disables it (an agent-influenced path), so a
+	// segment crafted to look like a content hash must be redacted.
+	PathSource string `json:"path_source,omitempty"`
 	// Enc marks how Input/Secrets are stored on disk. "b64" means both are
 	// base64-encoded so no literal credential lands in git history; the
 	// loader decodes them. Absent means plaintext (legacy/benign rows).
@@ -61,7 +66,11 @@ type corpusRow struct {
 // else — argv elements, KV lines, connection strings, prose).
 func redactRow(p *Pipeline, row corpusRow) string {
 	if row.Kind == "path" {
-		return string(p.RedactPath(row.Input))
+		trust := PathResolved
+		if row.PathSource == "claimed" {
+			trust = PathClaimed
+		}
+		return string(p.RedactPath(row.Input, trust))
 	}
 	return string(p.Redact(row.Input))
 }

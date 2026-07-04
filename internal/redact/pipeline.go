@@ -171,18 +171,51 @@ func (p *Pipeline) RedactArgv(argv []string) []Redacted {
 	return out
 }
 
+// PathTrust is the provenance of a path handed to RedactPath, which decides
+// whether the content-addressed allowlist may apply. It is the kernel-truth
+// discriminator (P1) that resolves the precision/leak tension in that
+// allowlist (see classifyPathContext).
+type PathTrust uint8
+
+const (
+	// PathClaimed is the SAFE DEFAULT (zero value): the path is
+	// agent-influenced — a syscall-argument-derived / TOCTOU-racy path
+	// (path_source=claimed), or one whose provenance is simply unknown. The
+	// content-addressed allowlist is NOT applied, so a segment an attacker
+	// CRAFTS to look like a content hash (…/objects/<hex-secret>) or a v4 UUID
+	// is entropy-scanned and redacted like anything else.
+	PathClaimed PathTrust = iota
+	// PathResolved: the path came from the kernel's in-BPF dentry+mount walk
+	// (path_source=resolved) — the file genuinely exists at this path. The
+	// content-addressed allowlist applies, so a real git/nix content hash is
+	// not over-redacted. An attacker cannot forge a resolved path without
+	// actually creating the file, at which point a hex-encoded secret in the
+	// filename is a covert channel outside redaction's threat model (LIMITS.md).
+	PathResolved
+)
+
 // RedactPath redacts a filesystem path per-segment, per docs/REDACTION.md
-// Stage 3: each path component is evaluated as its own candidate token
-// against the entropy thresholds, with a contextual allowlist for
-// known-benign high-entropy shapes (git object paths, content-addressed
-// store paths under a directory named "objects" or "commits", and
-// version-4-shaped UUIDs). Non-entropy structural patterns (e.g. an AWS key
-// embedded in a segment) still apply per segment.
-func (p *Pipeline) RedactPath(pth string) Redacted {
+// Stage 3: each path component is evaluated as its own candidate token against
+// the entropy thresholds. For a kernel-RESOLVED path (trust == PathResolved) a
+// contextual allowlist spares known-benign high-entropy shapes (content hashes
+// under an "objects"/"commits" directory, RFC-4122 v4 UUIDs) so the path a
+// file event exists to record is not shredded. For a CLAIMED path (the safe
+// default) that allowlist is disabled — an agent-controlled segment shaped
+// like a content hash is redacted, closing the crafted-path blind spot.
+// Non-entropy structural patterns (e.g. an AWS key embedded in a segment)
+// always apply per segment, regardless of trust.
+func (p *Pipeline) RedactPath(pth string, trust PathTrust) Redacted {
 	// Preserve a leading slash / scheme-less separators exactly; split on
 	// "/" only (paths, not URLs — those go through Redact/argv instead).
 	segments := strings.Split(pth, "/")
-	segClasses := classifyPathContext(segments)
+	// The content-addressed allowlist is trusted only for kernel-resolved
+	// paths; a claimed path gets no allowlist, so every segment is scanned.
+	var segClasses map[int]bool
+	if trust == PathResolved {
+		segClasses = classifyPathContext(segments)
+	} else {
+		segClasses = map[int]bool{}
+	}
 
 	out := make([]string, len(segments))
 	for i, seg := range segments {
@@ -214,14 +247,17 @@ func (p *Pipeline) RedactPath(pth string) Redacted {
 // redacting every content hash would destroy the forensic value of the path),
 // or a strict RFC-4122 version-4 UUID segment anywhere.
 //
-// This allowlist is a deliberate precision trade-off with a documented blind
-// spot (LIMITS.md §"redaction"): a secret an attacker CRAFTS to look like a
-// hash-length hex file under an "objects"/"commits" directory in a PATH field
-// (path_source=claimed), or as a valid-v4-nibble UUID, escapes the entropy
-// pass. That is preferred over the ~18% benign-path over-redaction that
-// tightening to the exact ".git" layout would cause. Structural provider
-// patterns (Stage 2) still run on allowlisted segments, so a literal AKIA…/
-// sk-… secret embedded in such a segment is still caught.
+// This allowlist is applied ONLY to kernel-resolved paths (see RedactPath /
+// PathTrust): the caller vouches, from the kernel dentry walk, that the file
+// genuinely exists at this path, so a hash-shaped segment is a real content
+// hash and must not be shredded. On a CLAIMED (agent-influenced) path the
+// allowlist is not consulted at all, so a secret an attacker crafts into a
+// hash-shaped or UUID-shaped segment is redacted. The only residual is a
+// malicious agent that CREATES a real file whose name hex-encodes a secret and
+// then touches it — a covert channel out of redaction's threat model
+// (LIMITS.md §"redaction"; a fully-malicious agent has far easier exfil).
+// Structural provider patterns (Stage 2) still run on allowlisted segments, so
+// a literal AKIA…/sk-… secret embedded in such a segment is still caught.
 func classifyPathContext(segments []string) map[int]bool {
 	allow := make(map[int]bool)
 	for i, seg := range segments {

@@ -223,7 +223,7 @@ func TestRedactArgvSecretSplitAcrossBoundary(t *testing.T) {
 func TestRedactPathPerSegment(t *testing.T) {
 	p := testPipeline(t)
 	in := "/tmp/upload/aB3xQ9zR7mK2pL8vN4wT6yU1zZ9/file.txt"
-	out := string(p.RedactPath(in))
+	out := string(p.RedactPath(in, PathResolved))
 	if strings.Contains(out, "aB3xQ9zR7mK2pL8vN4wT6yU1zZ9") {
 		t.Errorf("raw secret path segment leaked: %q", out)
 	}
@@ -238,7 +238,7 @@ func TestRedactPathPerSegment(t *testing.T) {
 func TestRedactPathOrdinaryPathUnchanged(t *testing.T) {
 	p := testPipeline(t)
 	in := "/usr/lib/x86_64-linux-gnu/libc.so.6"
-	out := string(p.RedactPath(in))
+	out := string(p.RedactPath(in, PathResolved))
 	if out != in {
 		t.Errorf("RedactPath(%q) = %q, want unchanged", in, out)
 	}
@@ -247,7 +247,7 @@ func TestRedactPathOrdinaryPathUnchanged(t *testing.T) {
 func TestRedactPathGitObjectsAllowlisted(t *testing.T) {
 	p := testPipeline(t)
 	in := "/home/user/repo/.git/objects/ab/cdef0123456789abcdef0123456789abcdef01"
-	out := string(p.RedactPath(in))
+	out := string(p.RedactPath(in, PathResolved))
 	if out != in {
 		t.Errorf("git object path should be allowlisted, got %q", out)
 	}
@@ -258,7 +258,7 @@ func TestRedactPathObjectsDirAllowlisted(t *testing.T) {
 	// A content-addressed store path under a dir named "objects" or
 	// "commits" with a 40/64-hex segment is contextually allowlisted.
 	in := "/nix/store/objects/deadbeefcafebabe0123456789abcdef01234567"
-	out := string(p.RedactPath(in))
+	out := string(p.RedactPath(in, PathResolved))
 	if out != in {
 		t.Errorf("objects-dir hex path should be allowlisted, got %q", out)
 	}
@@ -267,7 +267,7 @@ func TestRedactPathObjectsDirAllowlisted(t *testing.T) {
 func TestRedactPathUUIDAllowlisted(t *testing.T) {
 	p := testPipeline(t)
 	in := "/var/run/containers/550e8400-e29b-41d4-a716-446655440000/rootfs"
-	out := string(p.RedactPath(in))
+	out := string(p.RedactPath(in, PathResolved))
 	if out != in {
 		t.Errorf("UUID path segment should be allowlisted, got %q", out)
 	}
@@ -279,7 +279,7 @@ func TestRedactPathNonAllowlistedHexOutsideObjectsDirIsRedacted(t *testing.T) {
 	// .git/objects path should still be caught by the entropy pass if it
 	// meets the bar (hex >= 32 chars).
 	in := "/tmp/uploads/deadbeefcafebabe0123456789abcdef01234567/payload"
-	out := string(p.RedactPath(in))
+	out := string(p.RedactPath(in, PathResolved))
 	if strings.Contains(out, "deadbeefcafebabe0123456789abcdef01234567") {
 		t.Errorf("non-contextual hex blob should be redacted, got %q", out)
 	}

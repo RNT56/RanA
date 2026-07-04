@@ -240,7 +240,7 @@ by construction, no raw captured string can reach a ledger leaf hash. Trust core
 | Symbol | Purpose |
 |---|---|
 | `NewPipeline(salt, …Option)` | Compile the pipeline with a per-ledger salt + built-in patterns. |
-| `Pipeline.Redact` / `RedactArgv` / `RedactPath` | Redact a string / argv / path, returning `Redacted`. |
+| `Pipeline.Redact` / `RedactArgv` / `RedactPath(pth, PathTrust)` | Redact a string / argv / path, returning `Redacted`. `RedactPath` takes the path's kernel provenance (`PathResolved`/`PathClaimed`); the content-addressed allowlist applies only to resolved paths. |
 | `Redacted` | String subtype; the ledger writer accepts **only** this type. |
 | `Redacted.Literal(string)` | Mark a compile-time constant safe without the pipeline. |
 | `WithExtraPatterns`, `WithStricterEntropy` | Options that only **tighten** — never loosen — coverage. |

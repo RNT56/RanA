@@ -34,6 +34,11 @@
 #include <linux/bpf.h>
 
 typedef unsigned short umode_t_placeholder;
+
+/* Kernel pid_t (used by the sched_process_exec tracepoint prototype).
+ * Userspace <linux/types.h> defines only __kernel_pid_t; the kernel's
+ * `typedef __kernel_pid_t pid_t` (= int) is stable UAPI, restated here. */
+typedef int pid_t;
 typedef unsigned int dev_t_placeholder;
 
 /* Forward declarations so field types below can reference each other

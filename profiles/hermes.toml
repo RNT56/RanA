@@ -1,0 +1,93 @@
+# RanA profile: hermes
+# Hermes Agent (Nous Research, github.com/NousResearch/hermes-agent): a
+# self-improving personal agent. Two entry points — the `hermes` terminal UI,
+# and a gateway that talks to Telegram / Discord / Slack / WhatsApp / Signal /
+# Email. Config + skills + plugins live under ~/.hermes (HERMES_HOME). Python.
+#
+# Architecturally the closest match to OpenClaw: one long-lived process owning
+# the messaging surfaces and fanning out to tools, sub-agents, and code
+# execution. That fan-out IS RanA's session tree — one cgroup slice captures
+# the agent + every LOCAL exec + every egress by inheritance.
+#
+# HONEST CAPTURE CAVEAT (P1/P10): Hermes can run tool code in abstracted
+# ENVIRONMENTS — Local, Docker, SSH, Modal, Daytona, Singularity. RanA's
+# kernel capture is cgroup-bound to the LOCAL session, so:
+#   * Local environment  -> fully captured (same cgroup, by inheritance).
+#   * Docker/Singularity  -> the container's processes live in a different
+#     cgroup owned by the container runtime, not the session; RanA sees the
+#     `docker`/runtime invocation (the precursor) but not the in-container
+#     execs — same class as OpenClaw's delegated-spawn blind spot.
+#   * SSH/Modal/Daytona (remote) -> executed off-host; invisible to a local
+#     recorder. RanA records the outbound connection, not the remote effects.
+# This is documented in LIMITS.md; it is a property of where the code runs,
+# not a gap in RanA.
+
+[profile]
+name        = "hermes"
+description = "Hermes Agent (Nous Research) — self-improving personal agent, gateway + tool/code execution."
+version     = 1
+
+[match]
+auto = true
+exe_basename = ["hermes"]
+# The gateway and the terminal UI share the `hermes` entry point; match on the
+# basename. adopt corroborates via ~/.hermes existing on disk.
+argv_contains = []
+
+[adopt]
+config_dir       = "~/.hermes"
+linux_supervisor  = "systemd"
+macos_supervisor  = "launchd"
+consent_default   = "yes"
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true
+
+[digest]
+# Hermes's durable artifacts: the workspace it produces into, and the SKILLS it
+# writes for itself (the self-improving loop persists learned skills here).
+scopes  = ["~/.hermes/workspace/**", "~/.hermes/skills/**"]
+exclude = ["~/.hermes/**/cache/**", "~/.hermes/**/*.log", "~/.hermes/logs/**"]
+
+[sensitive_read]
+# Hermes's 70+ tools and code-execution reach make the credential surface wide;
+# these reads are the exfiltration precursor RanA exists to catch.
+extra = [
+  "~/.hermes/credentials*",
+  "~/.hermes/**/*token*",
+  "~/.hermes/config.yaml",           # channel tokens (Telegram/Discord/…) live here
+  "~/.config/**/token*",
+  "~/.aws/**", "~/.config/gcloud/**", "~/.config/gh/**",
+]
+
+[markers]
+# The optional Hermes plugin (plugins/hermes/rana_plugin.py, dropped in
+# ~/.hermes/plugins/) emits run-lifecycle markers over the rana marker socket,
+# upgrading the raw event river into
+# "inbound message -> these execs -> these egress connects -> this file changed".
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId, agentId, channel, status  -> yes
+#   message text / prompt / completion -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"
+events        = ["run.start", "run.end"]
+carry_fields  = ["runId", "agentId", "channel", "status"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
+
+[timeline]
+lens          = "causality"
+cluster_by    = "runId"
+fallback_lens = "inferred"
+
+[retention]
+# Personal-agent sessions are long-lived; keep more history but still bounded.
+ttl_days = 60

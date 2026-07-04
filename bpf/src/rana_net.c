@@ -172,7 +172,8 @@ int BPF_PROG(rana_unix_connect, struct socket *sock, struct sockaddr *addr,
 	/* struct sockaddr_un's sun_path is a fixed 108-byte buffer inline in
 	 * `addr` (cast from struct sockaddr*); read it directly as kernel
 	 * memory reachable from the fentry argument (never user memory). */
-	__builtin_memset(rec->path, 0, sizeof(rec->path));
+	/* No zero-fill of the multi-KB path buffer — decoder slices by
+	 * path_len (see the buffer-tail note in rana_exec.c). */
 	rec->path_len = 0;
 	if (addr) {
 		/* sun_path begins at offset 2 in sockaddr_un (after

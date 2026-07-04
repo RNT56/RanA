@@ -104,6 +104,34 @@ struct {
 	__type(value, __u32); /* rule id */
 } rana_sensitive_inodes SEC(".maps");
 
+/* rana_scratch: per-CPU scratch for intermediates too large for the
+ * 512-byte BPF stack (the resolve-path component stack is 48*16=768B;
+ * the fs pre-match path staging is RANA_CAP_FSOP_PATH=2048B — both blew
+ * the stack limit when declared as locals). Safe to share across the
+ * programs that use it: they are all process-context tp_btf/fentry hooks
+ * running on the current task (at most one at a time per CPU, and none
+ * is reachable from inside another); the one softirq-context program
+ * (cgroup_skb DNS) never touches this scratch. Sequential uses within a
+ * single invocation (exe_path then cwd; staging then copy-out) each
+ * consume the scratch before the next begins. */
+struct rana_scratch {
+	struct qstr comps[RANA_MAX_PATH_COMPONENTS]; /* rana_resolve_path walk */
+	__u8 path_buf[RANA_CAP_FSOP_PATH];           /* rana_fs pre-match staging */
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct rana_scratch);
+} rana_scratch_map SEC(".maps");
+
+static __always_inline struct rana_scratch *rana_scratch(void)
+{
+	__u32 zero = 0;
+	return bpf_map_lookup_elem(&rana_scratch_map, &zero);
+}
+
 /* Returns the cgroup id (cgid) of the default/unified (v2) hierarchy for
  * the given task, via CO-RE-relocated field reads. This is the single
  * source of truth for "which cgroup is this task in" used by every
@@ -170,8 +198,13 @@ static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, i
 	if (!dentry || !out || out_cap <= 0)
 		return 0;
 
-	/* Scratch pointers to each component's qstr, nearest-leaf first. */
-	struct qstr comps[RANA_MAX_PATH_COMPONENTS];
+	/* Scratch pointers to each component's qstr, nearest-leaf first —
+	 * held in the per-CPU scratch map, not the stack (768B > the 512B
+	 * BPF stack limit). */
+	struct rana_scratch *scratch = rana_scratch();
+	if (!scratch)
+		return 0;
+	struct qstr *comps = scratch->comps;
 	int n = 0;
 
 	struct dentry *d = dentry;

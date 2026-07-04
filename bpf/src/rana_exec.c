@@ -65,11 +65,19 @@ int BPF_PROG(rana_on_exec, struct task_struct *task, pid_t old_pid,
 	 * resolved-path (path_source=resolved equivalent for exec context;
 	 * proc.exec has no explicit path_source field per schema — the
 	 * resolution method is the same trusted in-kernel walk either way). */
-	__builtin_memset(rec->exe_path, 0, sizeof(rec->exe_path));
+	/* NOTE (applies to every multi-KB record buffer in this project):
+	 * large buffers are deliberately NOT zero-filled. clang cannot lower
+	 * a multi-KB memset for the BPF target (unsupported libc call), and
+	 * zeroing is unnecessary: the userspace decoder
+	 * (internal/collector/records.go decodeStr) reads exactly *_len
+	 * bytes of each field, never the tail. Unwritten tail bytes are
+	 * stale ring-buffer memory from earlier RanA records — visible only
+	 * transiently to ranad (which already sees every record
+	 * pre-redaction; P3's permitted transient window) and never decoded
+	 * or persisted. */
 	struct dentry *exe_dentry = BPF_CORE_READ(bprm, file, f_path.dentry);
 	rec->exe_path_len = (__u16)rana_resolve_path(exe_dentry, rec->exe_path, sizeof(rec->exe_path));
 
-	__builtin_memset(rec->cwd, 0, sizeof(rec->cwd));
 	struct dentry *cwd_dentry = BPF_CORE_READ(task, fs, pwd.dentry);
 	rec->cwd_len = (__u16)rana_resolve_path(cwd_dentry, rec->cwd, sizeof(rec->cwd));
 
@@ -83,7 +91,6 @@ int BPF_PROG(rana_on_exec, struct task_struct *task, pid_t old_pid,
 	 * transiently in the ring buffer, never envp (P3: envp is never
 	 * read anywhere in this project).
 	 */
-	__builtin_memset(rec->argv, 0, sizeof(rec->argv));
 	rec->argv_len = 0;
 	rec->argv_truncated = 0;
 	struct mm_struct *mm = BPF_CORE_READ(bprm, mm);

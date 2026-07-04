@@ -53,10 +53,11 @@ static __always_inline void rana_emit_fsop(__u8 op, __u32 pid, __u64 cgid,
 	rec->flags = flags;
 	rec->mode = mode;
 
-	__builtin_memset(rec->path, 0, sizeof(rec->path));
+	/* No zero-fill of the multi-KB path buffers — see the buffer-tail
+	 * note in rana_exec.c: the decoder reads exactly path{,2}_len bytes;
+	 * a multi-KB memset cannot be lowered for the BPF target anyway. */
 	rec->path_len = (__u16)rana_resolve_path(dentry, rec->path, sizeof(rec->path));
 
-	__builtin_memset(rec->path2, 0, sizeof(rec->path2));
 	rec->path2_len = 0;
 	if (dentry2)
 		rec->path2_len = (__u16)rana_resolve_path(dentry2, rec->path2, sizeof(rec->path2));
@@ -147,10 +148,15 @@ int BPF_PROG(rana_file_open, struct file *file)
 
 	/* Sensitive-read matching happens on every open regardless of
 	 * write-intent (a read-only open of ~/.ssh/id_ed25519 is exactly
-	 * the trifecta precursor D9 exists to catch). */
-	__u8 path_buf[RANA_CAP_FSOP_PATH];
-	__builtin_memset(path_buf, 0, sizeof(path_buf));
-	int path_len = rana_resolve_path(dentry, path_buf, sizeof(path_buf));
+	 * the trifecta precursor D9 exists to catch). The staging buffer is
+	 * per-CPU scratch, not stack (2048B > the 512B BPF stack limit) —
+	 * resolve_path writes path_buf *after* its comps walk, so the two
+	 * scratch fields never overlap within this call. */
+	struct rana_scratch *scratch = rana_scratch();
+	if (!scratch)
+		return 0;
+	__u8 *path_buf = scratch->path_buf;
+	int path_len = rana_resolve_path(dentry, path_buf, RANA_CAP_FSOP_PATH);
 
 	__u32 rule = rana_match_sensitive_prefix(path_buf, path_len);
 	if (!rule)
@@ -175,9 +181,15 @@ int BPF_PROG(rana_file_open, struct file *file)
 			rec->ts_wall = bpf_ktime_get_boot_ns();
 			rec->flags = (__u64)f_flags;
 			rec->mode = (__u64)rule;
-			__builtin_memcpy(rec->path, path_buf, sizeof(path_buf));
-			rec->path_len = (__u16)path_len;
-			__builtin_memset(rec->path2, 0, sizeof(rec->path2));
+			/* Bounded helper copy, not memcpy: a 2048B memcpy
+			 * cannot be lowered for the BPF target, and only
+			 * path_len bytes are meaningful (decoder slices by
+			 * path_len; see the buffer-tail note in rana_exec.c). */
+			rec->path_len = 0;
+			if (path_len > 0 && path_len <= RANA_CAP_FSOP_PATH) {
+				if (bpf_probe_read_kernel(rec->path, (__u32)path_len, path_buf) == 0)
+					rec->path_len = (__u16)path_len;
+			}
 			rec->path2_len = 0;
 			bpf_ringbuf_submit(rec, 0);
 		}
@@ -286,9 +298,12 @@ int BPF_PROG(rana_path_link, struct dentry *old_dentry, struct path *new_dir,
 	if (!rana_cgid_in_session(cgid))
 		return 0;
 
-	__u8 path_buf[RANA_CAP_FSOP_PATH];
-	__builtin_memset(path_buf, 0, sizeof(path_buf));
-	int path_len = rana_resolve_path(old_dentry, path_buf, sizeof(path_buf));
+	/* Per-CPU scratch staging (see the file_open site above). */
+	struct rana_scratch *scratch = rana_scratch();
+	if (!scratch)
+		return 0;
+	__u8 *path_buf = scratch->path_buf;
+	int path_len = rana_resolve_path(old_dentry, path_buf, RANA_CAP_FSOP_PATH);
 
 	__u32 rule = rana_match_sensitive_prefix(path_buf, path_len);
 	if (!rule) {

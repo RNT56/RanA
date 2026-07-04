@@ -189,6 +189,11 @@ type PumpConfig struct {
 	// observed to be joined into a net.connect event (the v1 event schema). Defaults
 	// to 30s if zero.
 	DNSJoinWindow time.Duration
+	// Router selects the svc sink per event by the owner uid of the event's
+	// session (see router.go). Nil defaults to SingleUserRouter{Sink} — the
+	// per-user deployment, so single-user behavior is unchanged. A system-wide
+	// root ranad supplies a MultiUserRouter (docs/MULTIUSER.md).
+	Router EventRouter
 }
 
 // Pump wires one RecordSource to one FrameSink through decode -> enrich ->
@@ -206,6 +211,19 @@ type Pump struct {
 	headsLogDir   string
 	dnsJoinWindow time.Duration
 
+	// router picks the destination svc sink per event by the session's owner
+	// uid. In a single-user deployment it wraps the one Sink and ignores uid.
+	router EventRouter
+
+	// sessionUID records each session's owner uid (learned from the first
+	// exec record's Uid), so the router can deliver a session's events to that
+	// user's svc. Guarded by uidMu; only the single pump goroutine writes it,
+	// but the map is read on the same goroutine's hot path so no lock is
+	// strictly required today — the mutex keeps it safe if the inbound
+	// goroutine ever needs to read it (e.g. for per-session gap routing).
+	uidMu      sync.Mutex
+	sessionUID map[string]uint32
+
 	// endedMu guards endedSessions: session ids received via a
 	// wire.SessionEnd frame on the inbound goroutine (PumpInbound) but drained
 	// and acted on by the outbound goroutine (DrainEndedSessions), so the
@@ -221,6 +239,11 @@ func NewPump(cfg PumpConfig) *Pump {
 	if window == 0 {
 		window = 30 * time.Second
 	}
+	router := cfg.Router
+	if router == nil {
+		// Per-user default (D10): every event goes to the one svc sink.
+		router = SingleUserRouter{Sink: cfg.Sink}
+	}
 	return &Pump{
 		source:        cfg.Source,
 		sink:          cfg.Sink,
@@ -230,7 +253,27 @@ func NewPump(cfg PumpConfig) *Pump {
 		seg:           newSegTracker(cfg.Clock),
 		headsLogDir:   cfg.HeadsLogDir,
 		dnsJoinWindow: window,
+		router:        router,
+		sessionUID:    make(map[string]uint32),
 	}
+}
+
+// noteSessionUID records the owner uid for a session (from an exec record), so
+// the router can deliver that session's events to the right user's svc in a
+// multi-user deployment. A no-op in single-user (the router ignores uid).
+func (p *Pump) noteSessionUID(session string, uid uint32) {
+	p.uidMu.Lock()
+	p.sessionUID[session] = uid
+	p.uidMu.Unlock()
+}
+
+// ownerUID returns the recorded owner uid for a session (0 if not yet known —
+// harmless in single-user, where the router ignores uid; in multi-user an
+// unknown uid means the event is dropped-with-gap rather than misdelivered).
+func (p *Pump) ownerUID(session string) uint32 {
+	p.uidMu.Lock()
+	defer p.uidMu.Unlock()
+	return p.sessionUID[session]
 }
 
 // Sink exposes the underlying FrameSink (used by ranad's reconnect path to
@@ -343,6 +386,9 @@ func (p *Pump) enrich(decoded any) (schema.Event, string, error) {
 		if !ok {
 			return schema.Event{}, "", collector.ErrUnknownCgid
 		}
+		// Learn the session's owner uid so the router can deliver this
+		// session's events to that user's svc in a multi-user deployment.
+		p.noteSessionUID(session, rec.Uid)
 		ev, err := p.enricher.EnrichExec(rec, p.seg.Current(session))
 		return ev, session, err
 	case collector.ForkRecord:
@@ -430,11 +476,29 @@ func (p *Pump) frameAndSend(ev schema.Event) error {
 	if err != nil {
 		return fmt.Errorf("ranad: encode event: %w", err)
 	}
-	if err := p.sink.Send(&wire.Ev{Event: body}); err != nil {
+	// Route to the svc sink for this session's owner uid. In single-user the
+	// router ignores uid and returns the one sink (unchanged behavior).
+	sink, ok := p.router.SinkFor(p.ownerUID(ev.Session))
+	if !ok {
+		// Multi-user only: no svc is connected for this session's owner, so the
+		// event cannot be delivered — but it is NOT misdelivered to another
+		// user. Non-fatal (swallowed by Drain, like an unknown-cgid record).
+		// Ensuring a sink exists before routing a user's events
+		// (connect-before-route / buffering) is the multi-user daemon's job
+		// (docs/MULTIUSER.md); the single-user default always returns the one
+		// sink, so this branch is unreachable there.
+		return errNoSinkForOwner
+	}
+	if err := sink.Send(&wire.Ev{Event: body}); err != nil {
 		return fmt.Errorf("%w: %w", errSinkSendFailed, err)
 	}
 	return nil
 }
+
+// errNoSinkForOwner marks a processRecord error as "no svc connected for this
+// session's owner uid" — a multi-user-only, non-fatal drop (Drain swallows it,
+// like ErrUnknownCgid). Unreachable in the single-user default.
+var errNoSinkForOwner = errors.New("ranad: no svc sink registered for session owner uid")
 
 // FlushGaps closes the governor's current shed interval and returns one
 // wire.Ev frame per resulting gap (P5: "Ring-buffer drops, governor sheds,

@@ -113,6 +113,33 @@ func (e *Enricher) UnbindCgid(cgid uint64) {
 	delete(e.cgidToSession, cgid)
 }
 
+// EndSession releases all per-session Enricher state for a session that has
+// ended: its monotonic-Idx counter and its exe-provenance seen-map (the
+// latter grows with the number of distinct executables a session runs, so it
+// is the largest per-session footprint). It mirrors Governor.EndSession and
+// segTracker.EndSession so a single session-end signal can evict all three
+// together. Any cgids still bound to the session are unbound too, so a
+// finished session leaves no residue.
+//
+// Wiring note (LIMITS.md §8, CHANGELOG Plan v1.2): the ranad↔svc session-end
+// signal that would call this in production is a documented open item;
+// until it lands, this method exists and is unit-tested but is not yet
+// invoked by the daemon loop. It is deliberately safe to call for an unknown
+// session (a no-op) and MUST only be called once a session is truly over —
+// never for a live session, since dropping nextIdx mid-session would restart
+// Idx at 0 and duplicate identifiers.
+func (e *Enricher) EndSession(session string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.nextIdx, session)
+	delete(e.exeProvenance, session)
+	for cgid, s := range e.cgidToSession {
+		if s == session {
+			delete(e.cgidToSession, cgid)
+		}
+	}
+}
+
 // SessionForCgid returns the session id bound to cgid, if any.
 func (e *Enricher) SessionForCgid(cgid uint64) (string, bool) {
 	e.mu.Lock()

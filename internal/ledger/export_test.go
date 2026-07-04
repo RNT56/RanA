@@ -90,6 +90,56 @@ func TestExportProducesExpectedFiles(t *testing.T) {
 	}
 }
 
+// TestExportNeverLeaksPrivateKeyOrSalt is a direct regression guard for
+// docs/TRUST.md §7's guarantee ("pubkey.pem ... NOT the private key, NOT
+// the ledger salt") and CLAUDE.md P3/§6: an exported proof directory is
+// handed to third parties, so it must never contain the raw bytes of the
+// device's Ed25519 private key or the per-ledger redaction/CRC salt — the
+// salt is load-bearing for correlating a marker's typed-replacement CRC
+// back to a real secret (docs/REDACTION.md §4), so its presence in an
+// export would defeat redaction's whole purpose for every marker ever
+// produced by this ledger, not just one event.
+func TestExportNeverLeaksPrivateKeyOrSalt(t *testing.T) {
+	d, key := buildCleanLedger(t)
+	salt, err := d.LoadOrCreateSalt()
+	if err != nil {
+		t.Fatalf("LoadOrCreateSalt: %v", err)
+	}
+	if len(key.PrivateKey) == 0 {
+		t.Fatalf("test fixture key has no private key half; test would be vacuous")
+	}
+	if len(salt) == 0 {
+		t.Fatalf("test fixture salt is empty; test would be vacuous")
+	}
+
+	outDir := t.TempDir()
+	session := "01ARZ3NDEKTSV4RRFFQ69G5FC0"
+	if err := Export(d, session, outDir); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatalf("ReadDir(outDir): %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		path := filepath.Join(outDir, e.Name())
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading exported file %s: %v", path, err)
+		}
+		if bytes.Contains(b, key.PrivateKey) {
+			t.Fatalf("exported file %s contains the device PRIVATE key bytes", e.Name())
+		}
+		if bytes.Contains(b, salt) {
+			t.Fatalf("exported file %s contains the ledger redaction salt bytes", e.Name())
+		}
+	}
+}
+
 func TestExportUnknownSession(t *testing.T) {
 	d, _ := buildCleanLedger(t)
 	outDir := t.TempDir()

@@ -57,6 +57,24 @@ func TestAdversarialMalformedInputsDoNotPanic(t *testing.T) {
 			"segments.cbor":    {},
 			"checkpoints.cbor": mustOuterWithHugeBodyLen(),
 		},
+		// bodyLen near uint64 max: int(bodyLen) wraps negative on a 64-bit
+		// build, which must still be rejected cleanly rather than bypassing
+		// the "off+int(n) > len(rec)" bounds check and panicking on the
+		// subsequent slice expression (splitCheckpointRecord).
+		"checkpoint body length overflows int inside outer": {
+			"manifest.json":    validManifest(),
+			"events.cbor":      {},
+			"segments.cbor":    {},
+			"checkpoints.cbor": mustOuterWithOverflowingBodyLen(),
+		},
+		// sigLen near uint64 max, with a well-formed (small) bodyLen —
+		// exercises the second half of splitCheckpointRecord's bounds check.
+		"checkpoint sig length overflows int inside outer": {
+			"manifest.json":    validManifest(),
+			"events.cbor":      {},
+			"segments.cbor":    {},
+			"checkpoints.cbor": mustOuterWithOverflowingSigLen(),
+		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -76,6 +94,46 @@ func mustOuterWithHugeBodyLen() []byte {
 	n := binary.PutUvarint(inner, uint64(1)<<40)
 	inner = inner[:n]
 	inner = append(inner, []byte{1, 2, 3}...)
+
+	outer := make([]byte, 32)
+	m := binary.PutUvarint(outer, uint64(len(inner)))
+	outer = outer[:m]
+	outer = append(outer, inner...)
+	return outer
+}
+
+// mustOuterWithOverflowingBodyLen builds a checkpoints.cbor outer record
+// whose inner bodyLen uvarint is ^uint64(0)-5 (near uint64 max, well above
+// math.MaxInt64) — large enough that int(bodyLen) wraps to a negative
+// number on a 64-bit build, the exact shape that defeated
+// splitCheckpointRecord's bounds check before it was fixed to compare
+// against the remaining buffer length pre-conversion.
+func mustOuterWithOverflowingBodyLen() []byte {
+	inner := make([]byte, 32)
+	n := binary.PutUvarint(inner, ^uint64(0)-5)
+	inner = inner[:n]
+	inner = append(inner, []byte{1, 2, 3}...)
+
+	outer := make([]byte, 32)
+	m := binary.PutUvarint(outer, uint64(len(inner)))
+	outer = outer[:m]
+	outer = append(outer, inner...)
+	return outer
+}
+
+// mustOuterWithOverflowingSigLen is mustOuterWithOverflowingBodyLen's
+// counterpart for the sigLen half of splitCheckpointRecord: a small,
+// well-formed bodyLen/body followed by a sigLen uvarint near uint64 max.
+func mustOuterWithOverflowingSigLen() []byte {
+	inner := make([]byte, 0, 32)
+	bodyLenBuf := make([]byte, 32)
+	n := binary.PutUvarint(bodyLenBuf, 3)
+	inner = append(inner, bodyLenBuf[:n]...)
+	inner = append(inner, []byte{1, 2, 3}...) // body
+
+	sigLenBuf := make([]byte, 32)
+	n2 := binary.PutUvarint(sigLenBuf, ^uint64(0)-5)
+	inner = append(inner, sigLenBuf[:n2]...)
 
 	outer := make([]byte, 32)
 	m := binary.PutUvarint(outer, uint64(len(inner)))

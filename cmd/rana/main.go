@@ -120,7 +120,14 @@ func defaultDataDir() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(os.TempDir(), "rana")
+		// Last-resort fallback: namespace by uid. This directory holds the
+		// ledger AND the ed25519 signing key + redaction salt, so a bare
+		// shared os.TempDir()/rana would let whichever local user created it
+		// first own a path the others then can't write (a denial of
+		// recording) — and, worse for key material, invites confusion about
+		// whose key lives there. A uid-qualified path keeps each user's
+		// key/ledger in a directory only they created.
+		return filepath.Join(os.TempDir(), fmt.Sprintf("rana-%d", os.Getuid()))
 	}
 	return filepath.Join(home, ".local", "share", "rana")
 }

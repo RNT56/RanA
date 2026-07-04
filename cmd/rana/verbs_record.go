@@ -154,6 +154,18 @@ func cmdAdoptAutoDetect(p adoptDetectParams) int {
 	}
 
 	match := adoptable[0]
+	// The process-table match (exe basename / argv) is spoofable by any
+	// same-uid process, so it is not sufficient on its own to auto-proceed
+	// into an in-place adoption. Require a second, independent signal — the
+	// profile's declared config directory existing on disk — before saying
+	// "adopting"; otherwise report the match and make the user confirm
+	// explicitly (which targets the same fixed unit, but on their say-so).
+	if !candidateCorroborated(match) {
+		fmt.Fprintf(p.Stdout, "rana adopt: detected a process matching %s (pid %d), but could not corroborate it\n", match.Profile.Name, match.Proc.Pid)
+		fmt.Fprintf(p.Stdout, "  (its expected config dir %s was not found — the process name alone is not enough to adopt).\n", match.Profile.Adopt.ConfigDir)
+		fmt.Fprintf(p.Stdout, "If this is really your agent, adopt it explicitly:  rana adopt %s\n", match.Profile.Name)
+		return exitOK
+	}
 	fmt.Fprintf(p.Stdout, "rana adopt: detected %s (pid %d) — adopting.\n", match.Profile.Name, match.Proc.Pid)
 	return adoptPlatform(adoptParams{
 		Profile: match.Profile,

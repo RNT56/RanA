@@ -574,13 +574,23 @@ func parseCheckpoints(buf []byte) ([]parsedCheckpoint, []int, error) {
 
 // splitCheckpointRecord reverses ledger.encodeCheckpointExportRecord:
 // [uvarint bodyLen][body][uvarint sigLen][sig].
+//
+// bodyLen/sigLen are uint64 values straight off the wire and MUST be
+// compared against the remaining buffer length BEFORE any conversion to
+// int, exactly as readUvarintPrefixedRecords does above: converting an
+// adversarial length near uint64 max (or merely >2^63) to int wraps to a
+// negative number, which would silently defeat an "off+int(n) > len(rec)"
+// bounds check (a huge negative is never "greater than" len(rec)) and panic
+// on the subsequent slice expression instead of returning a clean error.
+// This function must never panic on attacker-controlled bytes (a corrupted
+// or hostile checkpoints.cbor inside an untrusted .ranaproof export).
 func splitCheckpointRecord(rec []byte) (body, sig []byte, err error) {
 	bodyLen, sz := binary.Uvarint(rec)
 	if sz <= 0 {
 		return nil, nil, errors.New("malformed body length uvarint")
 	}
 	off := sz
-	if off+int(bodyLen) > len(rec) {
+	if bodyLen > uint64(len(rec)-off) {
 		return nil, nil, errors.New("body length overruns record")
 	}
 	body = rec[off : off+int(bodyLen)]
@@ -591,7 +601,7 @@ func splitCheckpointRecord(rec []byte) (body, sig []byte, err error) {
 		return nil, nil, errors.New("malformed sig length uvarint")
 	}
 	off += sz2
-	if off+int(sigLen) > len(rec) {
+	if sigLen > uint64(len(rec)-off) {
 		return nil, nil, errors.New("sig length overruns record")
 	}
 	sig = rec[off : off+int(sigLen)]

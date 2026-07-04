@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,6 +20,17 @@ func svcSocketPath() string {
 // svcRunDir resolves the runtime directory for the svc socket: RANA_RUN_DIR,
 // else $XDG_RUNTIME_DIR/rana, else /run/user/<uid>/rana, else a temp
 // fallback. These are all env/derived paths, never captured agent data (P3).
+//
+// The last-resort temp fallback is namespaced by uid
+// (rana-run-<uid>, not a bare shared rana-run) so two different local users
+// falling back to the same os.TempDir() (e.g. a bare /tmp with no
+// XDG_RUNTIME_DIR set) never contend for the same directory: MkdirAll does
+// not tighten the permissions of a directory that already exists, so a
+// shared, unqualified fallback path would let whichever user runs `rana
+// run` first "claim" it and leave every other local user unable to bind
+// their own socket there (a denial of recording, not a spoofing vector —
+// svc's RequirePeerUID still gates who may push events in — but worth
+// closing since it costs nothing).
 func svcRunDir() string {
 	if d := os.Getenv("RANA_RUN_DIR"); d != "" {
 		return d
@@ -26,7 +38,18 @@ func svcRunDir() string {
 	if x := os.Getenv("XDG_RUNTIME_DIR"); x != "" {
 		return filepath.Join(x, "rana")
 	}
-	return filepath.Join(os.TempDir(), "rana-run")
+	if runDir := fmt.Sprintf("/run/user/%d/rana", os.Getuid()); dirUsable(filepath.Dir(runDir)) {
+		return runDir
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("rana-run-%d", os.Getuid()))
+}
+
+// dirUsable reports whether path exists and is a directory, used to decide
+// whether the /run/user/<uid> fallback is viable on this host before
+// preferring it over the temp fallback.
+func dirUsable(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }
 
 // workingDir returns the current working directory ($SESSION_CWD for the

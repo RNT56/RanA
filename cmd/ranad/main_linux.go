@@ -269,14 +269,58 @@ func dialSVC(ctx context.Context, path string) (*net.UnixConn, error) {
 	return uc, nil
 }
 
+// socketOwnerUID returns the uid that owns the filesystem entry at path
+// (the svc unix socket ranad just dialed). Used by serveConnection to
+// verify the connected peer's SO_PEERCRED uid actually matches whoever
+// controls the socket path, rather than trusting any process that answers
+// there. A best-effort, defense-in-depth check: like any path-based stat,
+// it is not immune to the socket being replaced between dial and stat, but
+// it closes the common case (a stale or foreign-owned listener already
+// sitting at the path when ranad connects) that the pure Hello-handshake
+// role check does not.
+func socketOwnerUID(path string) (uint32, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, fmt.Errorf("ranad: could not read owner uid of %s", path)
+	}
+	return st.Uid, nil
+}
+
 // serveConnection drives one connection's lifetime: Hello handshake,
 // daemon_restart gap, then concurrently pumping outbound event frames and
 // inbound Head frames until either direction errors.
+//
+// Before anything else, it verifies the peer's SO_PEERCRED uid matches the
+// filesystem owner of the socket path ranad just dialed. ranad is the one
+// side of this link that does not know its peer's expected uid ahead of
+// time (svc's RequirePeerUID pins the reverse direction to root, but ranad
+// dials a per-user path and must discover whose socket it's talking to);
+// without this check, any local process that manages to have something
+// listening at cfg.SockPath when ranad dials (a mis-owned/world-writable
+// run-dir, a race during svc startup, a misconfigured RANA_RUN_DIR shared
+// across users) would receive ranad's Hello (including the redaction salt)
+// and every enriched kernel event ranad emits, and could feed forged Head
+// frames into the root-owned heads.log mirror (plan D27) — silently
+// defeating the same-uid tamper-evidence guarantee docs/THREAT-MODEL.md §3.2
+// depends on. Comparing against the file's owning uid (not e.g. a fixed
+// "non-root" assumption) keeps this correct for any recorded user.
 func serveConnection(ctx context.Context, conn *net.UnixConn, cfg daemonLoopConfig) error {
 	defer conn.Close()
 
-	if _, err := wire.PeerCred(conn); err != nil {
+	fileUID, statErr := socketOwnerUID(cfg.SockPath)
+	if statErr != nil {
+		return fmt.Errorf("ranad: stat svc socket %s: %w", cfg.SockPath, statErr)
+	}
+	peerUID, err := wire.PeerCred(conn)
+	if err != nil {
 		return fmt.Errorf("ranad: peer credential check failed: %w", err)
+	}
+	if peerUID != fileUID {
+		return fmt.Errorf("ranad: rejecting svc connection: peer uid %d does not match socket owner uid %d", peerUID, fileUID)
 	}
 
 	if err := wire.WriteFrame(conn, &wire.Hello{V: wire.Version, Role: wire.RoleRanad, Salt: cfg.Salt}); err != nil {

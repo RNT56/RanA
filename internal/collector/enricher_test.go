@@ -432,3 +432,57 @@ func TestEnrichMigrationBothCgidsUnknownErrors(t *testing.T) {
 		t.Errorf("err = %v, want ErrUnknownCgid", err)
 	}
 }
+
+// TestEnricherEndSessionReleasesPerSessionState verifies that EndSession
+// drops a finished session's Idx counter, exe-provenance seen-map, and any
+// still-bound cgids, so a long-lived daemon does not accumulate per-session
+// state forever (the cleanup path the ranad↔svc session-end signal will call;
+// LIMITS.md §8).
+func TestEnricherEndSessionReleasesPerSessionState(t *testing.T) {
+	clk := newFakeClock()
+	e := newTestEnricher(t, clk)
+	e.BindCgid(9, "sess-x")
+
+	// Exec twice to populate nextIdx and the exe-provenance seen-map.
+	rec := ExecRecord{
+		Pid: 100, Ppid: 1, Uid: 501, Cgid: 9, TsMono: 10, TsWall: 20,
+		Comm: "node", ExePath: "/usr/bin/node", Cwd: "/home/u",
+		Argv:         []string{"/usr/bin/node"},
+		ExeDigest:    [32]byte{1, 2, 3},
+		ExeDigestSet: true, // populate the exe-provenance seen-map
+	}
+	if _, err := e.EnrichExec(rec, 0); err != nil {
+		t.Fatalf("EnrichExec: %v", err)
+	}
+	if _, err := e.EnrichExec(rec, 0); err != nil {
+		t.Fatalf("EnrichExec: %v", err)
+	}
+
+	// Precondition: per-session state exists.
+	e.mu.Lock()
+	haveIdx := e.nextIdx["sess-x"] != 0
+	_, haveProv := e.exeProvenance["sess-x"]
+	_, haveCgid := e.cgidToSession[9]
+	e.mu.Unlock()
+	if !haveIdx || !haveProv || !haveCgid {
+		t.Fatalf("precondition: idx=%v prov=%v cgid=%v", haveIdx, haveProv, haveCgid)
+	}
+
+	e.EndSession("sess-x")
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, ok := e.nextIdx["sess-x"]; ok {
+		t.Error("nextIdx not released")
+	}
+	if _, ok := e.exeProvenance["sess-x"]; ok {
+		t.Error("exeProvenance not released")
+	}
+	if _, ok := e.cgidToSession[9]; ok {
+		t.Error("cgid binding not released")
+	}
+	// EndSession on an unknown session is a safe no-op.
+	e.mu.Unlock()
+	e.EndSession("never-existed")
+	e.mu.Lock()
+}

@@ -4,16 +4,30 @@
 # POSIX sh, no bashisms. Detects OS + arch, downloads the matching release
 # asset AND its SHA256, VERIFIES the checksum before touching the system, and
 # installs to /usr/local/bin. On Linux it also installs and enables the
-# hardened ranad.service. Fail-closed: a checksum mismatch aborts before
+# hardened ranad.service. Fail-closed on checksum mismatch: aborts before
 # install. Idempotent: re-running upgrades in place.
 #
+# Signature verification (cosign): every release artifact and SHA256SUMS
+# itself are keyless-signed (Sigstore/Fulcio) by .github/workflows/release.yml
+# (docs/SECURITY.md, docs/THREAT-MODEL.md). The SHA256 check above only
+# proves the download matches SHA256SUMS from the SAME host — it does not
+# prove that host wasn't compromised. So, when a `cosign` binary is on PATH,
+# this script also downloads each asset's `.sig`/`.pem` and runs
+# `cosign verify-blob` against the GitHub Actions OIDC identity. If `cosign`
+# is not installed, verification is SKIPPED and a loud warning is printed
+# (never silent success) — install falls back to checksum-only, matching
+# prior behavior. Set RANA_REQUIRE_COSIGN=1 to fail closed instead when
+# cosign is missing or verification fails.
+#
 # NO telemetry. NO phone-home. The only network calls are the explicit
-# artifact + checksum downloads from the GitHub releases API (plan D24).
+# artifact + checksum (+ signature) downloads from the GitHub releases API
+# (plan D24).
 #
 # Usage:
 #   curl -fsSL https://get.rana.dev | sh
 #   RANA_VERSION=v0.1.0 sh get-rana.sh        # pin a version
 #   RANA_PREFIX=/opt/bin sh get-rana.sh       # custom install prefix
+#   RANA_REQUIRE_COSIGN=1 sh get-rana.sh      # fail closed if cosign missing/fails
 #
 # After install:  rana doctor
 
@@ -27,6 +41,12 @@ PREFIX="${RANA_PREFIX:-/usr/local/bin}"
 VERSION="${RANA_VERSION:-latest}"
 GITHUB="${RANA_GITHUB:-https://github.com}"
 API="${RANA_API:-https://api.github.com}"
+# Fail closed (abort install) if cosign is missing or verify-blob fails,
+# instead of the default warn-and-continue.
+REQUIRE_COSIGN="${RANA_REQUIRE_COSIGN:-0}"
+# The GitHub Actions OIDC identity that release.yml signs with.
+COSIGN_IDENTITY_REGEXP="${RANA_COSIGN_IDENTITY_REGEXP:-^https://github.com/${REPO}/\.github/workflows/release\.yml@refs/tags/.*$}"
+COSIGN_OIDC_ISSUER="${RANA_COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 
 # Where the hardened unit is installed on Linux.
 SYSTEMD_UNIT_DIR="${RANA_SYSTEMD_DIR:-/etc/systemd/system}"
@@ -82,6 +102,61 @@ sha256_of() {
 }
 
 # ---------------------------------------------------------------------------
+# cosign (optional but strongly recommended): verifies the artifact was
+# produced by THIS repo's release workflow via Sigstore/Fulcio keyless
+# signing, not just that it matches a checksum served by the same host.
+# ---------------------------------------------------------------------------
+HAVE_COSIGN=0
+if command -v cosign >/dev/null 2>&1; then
+  HAVE_COSIGN=1
+else
+  log "WARNING: cosign not found on PATH — skipping signature verification."
+  log "WARNING: falling back to SHA256 checksum only, which does NOT protect"
+  log "WARNING: against a compromised release upload (checksum + binary come"
+  log "WARNING: from the same host). Install cosign for the full guarantee:"
+  log "WARNING: https://docs.sigstore.dev/system_config/installation/"
+  if [ "$REQUIRE_COSIGN" = "1" ]; then
+    die "RANA_REQUIRE_COSIGN=1 set but cosign is not installed (refusing to install)"
+  fi
+fi
+
+# cosign_verify ASSETPATH  — downloads ASSETPATH's .sig/.pem alongside it and
+# runs cosign verify-blob. No-op (returns success) if cosign is unavailable
+# and RANA_REQUIRE_COSIGN is not set; the caller has already warned above.
+cosign_verify() {
+  _path="$1"       # local path to the already-downloaded, checksum-verified file
+  _asset="$2"      # remote asset name, for constructing the .sig/.pem URLs
+
+  [ "$HAVE_COSIGN" = "1" ] || return 0
+
+  _sig="${_path}.sig"
+  _pem="${_path}.pem"
+  if ! download "$BASE_URL/${_asset}.sig" "$_sig" 2>/dev/null \
+      || ! download "$BASE_URL/${_asset}.pem" "$_pem" 2>/dev/null; then
+    log "WARNING: could not download signature for $_asset — skipping cosign verification"
+    if [ "$REQUIRE_COSIGN" = "1" ]; then
+      die "RANA_REQUIRE_COSIGN=1 set but no signature available for $_asset (refusing to install)"
+    fi
+    return 0
+  fi
+
+  if cosign verify-blob \
+      --signature "$_sig" \
+      --certificate "$_pem" \
+      --certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
+      --certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
+      "$_path" >/dev/null 2>&1; then
+    log "verified $_asset (cosign signature ok)"
+  else
+    if [ "$REQUIRE_COSIGN" = "1" ]; then
+      die "cosign signature verification FAILED for $_asset (refusing to install)"
+    fi
+    log "WARNING: cosign signature verification FAILED for $_asset"
+    log "WARNING: continuing on checksum-only match; set RANA_REQUIRE_COSIGN=1 to fail closed"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Detect OS + arch, map to release-asset naming.
 # ---------------------------------------------------------------------------
 os_raw="$(uname -s)"
@@ -129,6 +204,7 @@ trap 'rm -rf "$WORKDIR"' EXIT INT TERM
 log "downloading SHA256SUMS"
 download "$BASE_URL/SHA256SUMS" "$WORKDIR/SHA256SUMS" \
   || die "could not download SHA256SUMS for $VERSION"
+cosign_verify "$WORKDIR/SHA256SUMS" "SHA256SUMS"
 
 # Which binaries to install for this OS.
 #   linux : rana + ranad   (ranad is the root collector)
@@ -160,6 +236,8 @@ fetch_and_verify() {
     Refusing to install (fail-closed)."
   fi
   log "verified $_asset (sha256 ok)"
+
+  cosign_verify "$WORKDIR/$_asset" "$_asset"
 }
 
 for bin in $BINARIES; do

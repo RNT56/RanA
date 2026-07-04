@@ -63,6 +63,16 @@ The redaction pipeline (see `docs/REDACTION.md`) achieves ≥99% recall on a per
 
 If your threat model cannot tolerate a ≤1% path-embedded-secret risk, do not point RanA's digest scopes at directories containing such paths.
 
+## 4a. Tier-2 shareable-artifact limitations
+
+These features produce or annotate exports (`rana export --pack`, `rana export --format incident`, `rana show --diff`, `rana doctor --report`, `rana adopt` auto-detect, exe-provenance, egress intelligence). All of them are additive enrichment (P1: `origin=enrichment`, never load-bearing) and none of them makes a network call or reads `environ` — but each has a real, honest limit:
+
+- **Egress intelligence (`net_class`/`asn` on `alert.new_domain`) is a curated, hand-picked, ~10-entry anchor table compiled into the binary — not an IP-reputation or geolocation service, and it has no update mechanism.** It exists to narrate a timeline ("first contact: 8.8.8.8 (Google Public DNS)"), not to attribute ownership authoritatively. IP space is reassigned over time; a hardcoded prefix→label mapping can go stale and mislabel a block that has since changed hands. Absence of a label means nothing (most public addresses have no entry); presence of a label is a best-effort, build-time snapshot, not a live lookup. See `internal/alerts/rules.go` (`curatedASNPrefixes`).
+- **Exe-provenance (`exe_known`/`exe_first_seen`/`exe_changed` on `proc.exec`) is a local, embedded path+basename allowlist, not a code-signing or hash-reputation check.** `ExeKnownAllowlisted` only means "this exec's path and basename match a conventional interpreter/shell location" — it is not a verdict of trustworthiness, and it does not itself detect a compromised system binary. `exe_first_seen`/`exe_changed` are only as strong as the digest the *caller* supplies (`internal/collector/provenance.go` trusts the pairing it's told, per P1 doc comment); if no digest is ever supplied, the enrichment is silently absent, and the base `proc.exec` event is still complete without it.
+- **`rana adopt` auto-detect (`listRunningProcesses`) is a best-effort `/proc` scan, not a security boundary.** It reads only `comm`/`cmdline` (never `environ`, P3) and silently skips processes that exit or become unreadable mid-scan — appropriate for a one-shot convenience feature, not something to rely on for completeness the way the eBPF-sourced record is.
+- **`rana show --diff` (`DigestDiff`) reports on-disk *availability* only, never content.** A `HaveNew=false` result is ambiguous by design (changed, deleted, moved, or simply unreadable all collapse to "does not match") — see `Note` for which. It also depends on `PathTranslator` correctness (guest→host path translation on macOS); a wrong translation reports a false mismatch, not a wrong file's content.
+- **The incident report (`rana export --format incident`) is a narrative rendering of already-recorded, already-redacted events — its completeness is bounded by the same escapes as `LIMITS.md §3`.** It does not re-derive or infer anything the ledger doesn't already contain; a gap in the source ledger is a gap in the report.
+
 ## 5. Platform gaps
 
 - **Windows: not supported.** Not a port-in-progress — a deliberate non-goal for v1.

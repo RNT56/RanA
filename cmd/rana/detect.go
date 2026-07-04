@@ -1,7 +1,10 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/RNT56/RanA/internal/profile"
 )
@@ -77,4 +80,31 @@ func detectAdoptCandidates(list processLister) ([]detectedCandidate, error) {
 	// Deterministic order regardless of process-table enumeration order.
 	sort.Slice(out, func(i, j int) bool { return out[i].Profile.Name < out[j].Profile.Name })
 	return out, nil
+}
+
+// candidateCorroborated reports whether an auto-detected candidate is backed
+// by a second, independent signal beyond the (spoofable) process-table
+// exe/argv match: the profile's declared on-disk config directory actually
+// exists. A same-uid attacker can trivially name a process "openclaw
+// gateway" to satisfy the [match] rule, so auto-adopt must NOT proceed to a
+// privileged in-place adoption on the process name alone — it requires this
+// corroboration, otherwise it downgrades to reporting the match and asking
+// the user to confirm explicitly. (Hardening for when the systemd
+// write/restart path lands; today adoptPlatform only prints the plan.)
+func candidateCorroborated(c detectedCandidate) bool {
+	if c.Profile.Adopt == nil || c.Profile.Adopt.ConfigDir == "" {
+		return false
+	}
+	fi, err := os.Stat(expandTildePath(c.Profile.Adopt.ConfigDir))
+	return err == nil && fi.IsDir()
+}
+
+// expandTildePath expands a leading ~/ to the user's home directory.
+func expandTildePath(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	return p
 }

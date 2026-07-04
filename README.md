@@ -158,6 +158,7 @@ Native macOS process recording needs Endpoint Security entitlements Apple grants
 - [`docs/OPENCLAW.md`](./docs/OPENCLAW.md) &mdash; the adopt flow and causality explainer
 - Platform and process &mdash; [`MACOS`](./docs/MACOS.md) · [`PROFILES`](./docs/PROFILES.md) · [`SECURITY`](./docs/SECURITY.md) · [`CONTRIBUTING`](./CONTRIBUTING.md)
 - Design notes &mdash; [`MULTIUSER`](./docs/MULTIUSER.md) (system-wide ranad) · [`MACOS-NATIVE`](./docs/MACOS-NATIVE.md) (native ES path option)
+- [`docs/MCP.md`](./docs/MCP.md) &mdash; `rana-mcp`: query the ledger from an agent (read-only, effects-only, secret-free)
 - For contributors &mdash; [`docs/CONTRACTS.md`](./docs/CONTRACTS.md): the per-package interface contract every layer is built and tested against
 
 ## License

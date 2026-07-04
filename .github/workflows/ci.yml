@@ -70,7 +70,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p bin
-          for cmd in rana ranad rana-verify-standalone; do
+          for cmd in rana ranad rana-verify-standalone rana-mcp; do
             if [ -d "./cmd/$cmd" ]; then
               echo "building linux static $cmd"
               CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o bin/ "./cmd/$cmd"
@@ -348,7 +348,7 @@ jobs:
           GOARCH: arm64
         run: |
           mkdir -p bin
-          for cmd in rana ranad rana-verify-standalone; do
+          for cmd in rana ranad rana-verify-standalone rana-mcp; do
             if [ -d "./cmd/$cmd" ]; then
               echo "cross-building linux/arm64 $cmd"
               go build -trimpath -ldflags="-s -w" -o bin/ "./cmd/$cmd"
@@ -412,7 +412,7 @@ jobs:
         run: |
           mkdir -p dist
           built=0
-          for cmd in rana ranad rana-verify-standalone; do
+          for cmd in rana ranad rana-verify-standalone rana-mcp; do
             if [ -d "./cmd/$cmd" ]; then
               built=1
               # -buildvcs=false: VCS build-info stamps (checkout mtime, dirty

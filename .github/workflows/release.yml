@@ -50,7 +50,7 @@ jobs:
         run: |
           mkdir -p dist
           for arch in amd64 arm64; do
-            for cmd in rana ranad rana-verify-standalone; do
+            for cmd in rana ranad rana-verify-standalone rana-mcp; do
               if [ -d "./cmd/$cmd" ]; then
                 out="dist/${cmd}-linux-${arch}"
                 echo "building $out"

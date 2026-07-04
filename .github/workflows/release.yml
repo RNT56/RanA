@@ -54,7 +54,7 @@ jobs:
               if [ -d "./cmd/$cmd" ]; then
                 out="dist/${cmd}-linux-${arch}"
                 echo "building $out"
-                GOARCH="$arch" go build -trimpath -ldflags="-s -w -buildid=" \
+                GOARCH="$arch" go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" \
                   -o "$out" "./cmd/$cmd"
               else
                 echo "skip $cmd: ./cmd/$cmd not present yet"

@@ -415,7 +415,11 @@ jobs:
           for cmd in rana ranad rana-verify-standalone; do
             if [ -d "./cmd/$cmd" ]; then
               built=1
-              go build -trimpath -ldflags="-s -w -buildid=" -o "dist/$cmd" "./cmd/$cmd"
+              # -buildvcs=false: VCS build-info stamps (checkout mtime, dirty
+              # bit, .git presence) differ across runners and are the usual
+              # cause of a bit-for-bit mismatch; strip them for a deterministic
+              # build. -trimpath + -buildid= handle paths and the build id.
+              go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o "dist/$cmd" "./cmd/$cmd"
             fi
           done
           cd dist

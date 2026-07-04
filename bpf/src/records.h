@@ -5,8 +5,8 @@
  * This is the C mirror of internal/bpf/records.md (the canonical
  * byte-by-byte spec) and MUST match internal/collector/records.go exactly.
  * internal/bpf's TestRecordLayoutsMatchDoc cross-checks the Go-side
- * Size*/offset constants against records.md; this header is hand-kept in
- * lockstep with that document — do not add, remove, reorder, or resize any
+ * Size and offset constants against records.md; this header is hand-kept in
+ * lockstep with that document -- do not add, remove, reorder, or resize any
  * field without updating records.md and records.go in the same change.
  *
  * Conventions (see records.md "Conventions" for the full rationale):

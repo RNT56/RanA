@@ -22,6 +22,19 @@
 
 #include <linux/types.h>
 
+/* Minimal BPF UAPI constants the programs use, defined here so this header
+ * stays self-contained (the "minimal hand-defined" convention) rather than
+ * pulling in the whole <linux/bpf.h>. Values are the stable UAPI enum values
+ * (enum bpf_map_type; the update-flags enum). Only the ones actually
+ * referenced are declared. */
+enum {
+	BPF_MAP_TYPE_HASH = 1,
+	BPF_MAP_TYPE_RINGBUF = 27,
+};
+enum {
+	BPF_ANY = 0,
+};
+
 typedef unsigned short umode_t_placeholder;
 typedef unsigned int dev_t_placeholder;
 
@@ -66,6 +79,14 @@ struct task_struct {
 	struct cred *real_cred;
 	struct nsproxy *nsproxy;
 	struct fs_struct *fs;
+};
+
+/* path: the (mnt, dentry) pair fs_struct.pwd and file.f_path resolve against.
+ * Defined (not just forward-declared) because fs_struct embeds it BY VALUE;
+ * the pointed-to vfsmount/dentry stay incomplete (only pointer access). */
+struct path {
+	struct vfsmount *mnt;
+	struct dentry *dentry;
 };
 
 /* fs_struct: current working directory, for proc.exec's cwd field. */

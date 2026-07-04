@@ -46,8 +46,14 @@ BR2_LINUX_KERNEL_IMAGE=y
 # --- Filesystem images: an ext4 rootfs + initramfs. ------------------------
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
-# Keep it tight; the runtime layer + data volume carry the bulk.
-BR2_TARGET_ROOTFS_EXT2_SIZE="48M"
+# The runtime layer + data volume carry the bulk; the base rootfs is meant to
+# stay tight. 512M is a generous upper bound sized to hold the kernel's built
+# module tree (the arch default builds a broad `=m` set) plus the static Go
+# agents — an ext2 image file is not sparse, so this must exceed the populated
+# size or mkfs.ext4 fails with "could not allocate block". FOLLOW-UP: trim the
+# kernel module set (most SoC/driver modules are dead weight in a vz guest) to
+# restore a genuinely small base; tracked as a guest-image size-optimization.
+BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
 
 # --- Guest agents: ranad + the guest-side rana service are built OUTSIDE
 #     Buildroot (pure-Go static, cross-compiled) and installed via a

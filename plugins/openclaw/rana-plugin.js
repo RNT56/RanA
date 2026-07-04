@@ -67,7 +67,9 @@ function sendMarker(kind, fields) {
     payload = JSON.stringify({
       v: 1,
       token: SOCKET_TOKEN,
-      kind,                       // "run.start" | "run.end"
+      event: kind,                // "run.start" | "run.end" — the listener keys
+                                  // the marker.<event> type off the "event"
+                                  // field (internal/service/marker.go), NOT "kind".
       origin: 'enrichment',       // P1: never authoritative
       ...sanitize(fields),
     }) + '\n';

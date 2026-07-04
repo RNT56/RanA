@@ -22,18 +22,16 @@
 
 #include <linux/types.h>
 
-/* Minimal BPF UAPI constants the programs use, defined here so this header
- * stays self-contained (the "minimal hand-defined" convention) rather than
- * pulling in the whole <linux/bpf.h>. Values are the stable UAPI enum values
- * (enum bpf_map_type; the update-flags enum). Only the ones actually
- * referenced are declared. */
-enum {
-	BPF_MAP_TYPE_HASH = 1,
-	BPF_MAP_TYPE_RINGBUF = 27,
-};
-enum {
-	BPF_ANY = 0,
-};
+/* The BPF UAPI (map-type / update-flags enums and, critically, the
+ * `struct __sk_buff` program context the cgroup_skb DNS hook parses) comes
+ * from the authoritative <linux/bpf.h>. This is deliberately NOT part of the
+ * "minimal hand-defined CO-RE" set: __sk_buff is a fixed-layout *UAPI context*
+ * struct whose field offsets the verifier rewrites at load — a hand-rolled
+ * copy with a wrong offset would compile cleanly yet be rejected at load, the
+ * worst failure mode. The hand-defined structs below remain kernel-internal
+ * CO-RE types (task_struct, path, …), relocated against target BTF; only the
+ * stable UAPI is sourced here. */
+#include <linux/bpf.h>
 
 typedef unsigned short umode_t_placeholder;
 typedef unsigned int dev_t_placeholder;
@@ -150,11 +148,6 @@ struct mount {
 	struct mount *mnt_parent;
 	struct dentry *mnt_mountpoint;
 	struct vfsmount mnt;
-};
-
-struct path {
-	struct vfsmount *mnt;
-	struct dentry *dentry;
 };
 
 struct inode {

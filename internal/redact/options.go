@@ -66,6 +66,21 @@ func WithExtraPatterns(exprs []string) Option {
 // no-op. Any other combination returns ErrLooserEntropy.
 func WithStricterEntropy(minLen int, bitsPerChar float64) Option {
 	return func(p *Pipeline) error {
+		// A zero argument means "leave this dimension at its current value" —
+		// the documented unset sentinel (a profile that sets neither is filtered
+		// out before this option is even built; one that sets only ONE must
+		// tighten just that dimension). Without this, a profile that set only
+		// EntropyThreshold passed minLen=0, silently collapsing the length gate
+		// (0 > 20 is false, so it was accepted and every token qualified); and
+		// a profile that set only EntropyMinLen passed bitsPerChar=0, which is
+		// < 4.0 and so failed the whole pipeline/service construction. Both are
+		// audit-flagged coupling bugs.
+		if minLen == 0 {
+			minLen = p.minLen
+		}
+		if bitsPerChar == 0 {
+			bitsPerChar = p.bitsPerChar
+		}
 		if minLen > p.minLen {
 			return fmt.Errorf("%w: minLen %d looser than current %d", ErrLooserEntropy, minLen, p.minLen)
 		}

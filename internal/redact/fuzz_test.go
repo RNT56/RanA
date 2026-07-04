@@ -1,15 +1,16 @@
 package redact
 
 import (
+	"strings"
 	"testing"
 )
 
-// FuzzRedact asserts the two mechanical properties the trust core depends
-// on: Redact never panics on arbitrary input, and Redact is idempotent
-// (re-redacting already-redacted output is a no-op). It also spot-checks
-// that a non-empty, non-marker input which changed under redaction has its
-// original bytes fully removed from the output (no partial leak from an
-// off-by-one span).
+// FuzzRedact asserts the properties the trust core depends on: Redact never
+// panics on arbitrary input; Redact is idempotent (re-redacting already-
+// redacted output is a no-op); and — the leak-oriented check — a known secret
+// is still redacted no matter what fuzz-controlled context surrounds it, so a
+// mutation that lets adversarial context SUPPRESS redaction of a real secret
+// (a leak the panic/idempotency checks cannot see) is surfaced.
 func FuzzRedact(f *testing.F) {
 	seeds := []string{
 		"",
@@ -22,7 +23,7 @@ func FuzzRedact(f *testing.F) {
 		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
 		"/usr/lib/x86_64-linux-gnu/libc.so.6",
 		"/tmp/upload/aB3xQ9zR7mK2pL8vN4wT6yU1zZ9/file.txt",
-		"⟦R:entropy:m:d2e1⟧",
+		"⟦R:entropy:m:d2e1a4c8⟧",
 		"token=AKIAIOSFODNN7EXAMPLE token=AKIAIOSFODNN7EXAMPLE",
 		"a=b:c/d e\tf\ng",
 		"日本語のテキストにAKIAIOSFODNN7EXAMPLEが含まれています",
@@ -61,6 +62,17 @@ func FuzzRedact(f *testing.F) {
 		pathTwice := p.RedactPath(string(pathOnce))
 		if pathOnce != pathTwice {
 			t.Fatalf("RedactPath not idempotent: raw=%q once=%q twice=%q", raw, pathOnce, pathTwice)
+		}
+
+		// Leak-oriented property: a canonical, unambiguous secret (the AWS
+		// example access key) must be redacted regardless of the fuzz-chosen
+		// context preceding it. A mutation that lets context break tokenization
+		// or the structural match — and so SUPPRESS redaction of a real secret
+		// — is exactly the miss the panic/idempotency checks above cannot find.
+		const sentinel = "AKIA" + "IOSFODNN7EXAMPLE" // 20-char AWS example key
+		probe := raw + " " + sentinel
+		if strings.Contains(string(p.Redact(probe)), sentinel) {
+			t.Fatalf("sentinel secret survived redaction when preceded by context %q", raw)
 		}
 	})
 }

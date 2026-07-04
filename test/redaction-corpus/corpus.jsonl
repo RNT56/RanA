@@ -607,3 +607,42 @@
 {"enc":"xb64","input":"GhUaEV5ZQF0RFhBZVg0eQglLGh0TC09aCgEWHwIAAxYKBgIISh9cFRYVEhAZT0JFQRxVX0oAW1NfAQgJXEwBLDYVEzRlSV1XHy0ME0FVJS1ADVpEPyVWHzpYSlwZNi1LURsXCFArVAMQTh9IXUQAW1RUQlA=","must_redact":true,"secrets":["EwMtJUgFKDpBR1YfPgYYHl8uNR8PW1diM0pAMkJLXAo8JhRbEA9XUio="],"spans":[{"class":"entropy"}]}
 {"enc":"xb64","input":"XRMLEUJMQRUZAVxCGgUXTh8WVhMDQSBmKi47PyY1YjwhPBouPTg/MSIk","kind":"path","must_redact":true,"secrets":["MyonIGQsPDQ/MT1jTyoqbCY1NTc="],"spans":[{"class":"awskey"}]}
 {"enc":"xb64","input":"XQUPFUxMABAaEBBZC0AXVCENGzUCBy5EKSYnCjxCYxElSwMOHDMIBTkoRCwGOwg4GWBIISZ0WCo9GRYnDx1NCx0KHxRjChYiGSFWEyQMIClBUxhHPiorSjRfHB4iXCkeJzsxHTcnASJNJg==","kind":"path","must_redact":true,"secrets":["FxgkCU8kDBs/HDlkLRU7HCUMM0tPCxhnGQslORw8RDEXP0cmVTcmOF0uaQgYOx5FXUkXFRhKJRcAIlUkUkc1Ajw4GUNaTSEtdQwpSRxSJ1h9DyknIEUnZQs9Sng="],"spans":[{"class":"jwt"}]}
+{"enc":"xb64","input":"HRUeWw1WV0FJR0M=","secrets":["R1ldWB9T"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"AggAXBlbXUs=","secrets":["RllcWA=="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"BxILE3ITBhxNQkQcSl9G","secrets":["RVZfUx1X"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"EQAcBQ1XXUZCQUEZSltAGVlRS0ZTTgRVE09DQlpBFA==","secrets":["RlNaUxlRW0BER0cfTF1GHw=="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"AgAAQRlTX0JQRUYbTk9HGF1TWUdUW1cNABkEUERBHg==","secrets":["RlFeUQ1TWkRGVUYYTllSGF5QTw=="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"EwwLGQ1QWEZCQUYZTVpGHVtUS0RBDQlMEQgX","secrets":["QVZaUxlWW0dFQUMdSV1E"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"EwINDlgNG09BR0AZTVlFFVJVSEBSWlQbVFc=","secrets":["Q1NdVRhVWEpJRUIfS1tHG1xd"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"AgAdEl0LHRMDEE5FDQEGSBlXHx0TCxdIEQ==","secrets":["GhQAFUgRXRQfBxZbHR0="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"ERMLBUgNGxsRGU5MGgxDH1gBHBQ=","secrets":["EwMNUB9QCxcW"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"EwINBF4QMBEfERYQOV4wHyhW","secrets":["M1AsU25Q"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"ExQaCUYGFk8KDydCCDwXThkADSQAAg==","secrets":["CBs6Dl0wChECEAd7GQM="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"EQ0HBEMXMAEVFgFIDFI1Yig2KSpMDwNOJyo0QUdAShAGOGYn","secrets":["NS4tMn07QhMSFjdoPl5AHgwNEDgqIg=="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"AgAdEk4MCxdKVUQaQFdDHw==","secrets":["RVZWWRxR"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"HRUeAFgXBy0DEBBfHRtPZyk2LitSKjFoKz85QyUrfTItIXoyVj0i","secrets":["OCM9NnRQKyI1PSNmSz8qfSEnKiU4XSV9"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"AAQKCF5ZQF1KBkBOClwGbB4RESIAHRJtUl9cQFtDA0lVRB5cXA==","secrets":["AVINEx4XLgcEHSNMCxw="],"spans":[{"class":"connstring"}],"must_redact":true}
+{"enc":"xb64","input":"Hw4ABkIHDVkDBwUXV0AWTx4WHABbIxhgDAEVHyUEFAAvEUEeFg0XE15PQAwBFR8REQMWCgYCChUJ","secrets":["PxgjDkMEACIHTAs="],"spans":[{"class":"connstring"}],"must_redact":true}
+{"enc":"xb64","input":"HQIHWRdMQAETGgdZQhsbSg4XCQU5NyFJAQcdAwFJHE1dQwIEFxoe","secrets":["BggJBF8TGCop"],"spans":[{"class":"connstring"}],"must_redact":true}
+{"enc":"xb64","input":"IQQcF0gRUhpLMRJZGQ0TXg5YHUkxDxJeFAAAFEggXEk8F04ZAA0iFlU1XxYcBhURTkMX","secrets":["IRBfMkgAHRcEJQQ="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"AQQdEkQMAVJHERBIHlpKHF1dGBNUXQcUB1YTQEMSSx1PF0MP","secrets":["RQUNBEtWV0NGTRJMTVwUFA9cGEJXDwdI"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"FgQYCElDDkMSRxAeHFsXGA1TSUVQVkFfBggbAwEWXx0L","secrets":["E1AMU05QC0YVQBUbSFhDFQ=="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"GgwPAg1aCUpGEUMVSVdKGQhSHURUVwAfBQoTEUUQGE0OFh1aUA==","secrets":["SwdWV0lTV0NITUdOTwtEGFIESxQEDwAdAFpHERFDHE0="],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"EQANCUhNWBYTEBUYQF5EFQoETEEHVwUUAl9EERMWAwwCAg==","secrets":["RQUNBEtWV0NGTRJMTVwUFA9cGEJXDwdI"],"spans":[{"class":"entropy"}],"must_redact":true}
+{"enc":"xb64","input":"X0xDTAAhKjU5O1NoO08ifyIzOCYkTipoOkJfXVheJzUnEW4qNDw3KD8lWjleKxdGHWUTPkBbJV0BIFUaLV0uWQE7TBlrSwc1GgkzTBE2Xw93Uw4jHzQcajssA2o4KE1Lay8WaCsAJyExIko5Khl8WRM3Shk8VVkvHz9GBjgUEilBRSxSGyRUDTYcDTVCFS0SYAgjFxRhDihAFyBZVTFbBk1IeQBVQl8ALis9UiQtQX0xJiQxITYNMyorAEZIVF8=","secrets":["GTBcF2NbFyBEAU4Q"],"spans":[{"class":"pem"}],"must_redact":true}
+{"input":"spin=fast","spans":[],"must_redact":false}
+{"input":"swapping=true","spans":[],"must_redact":false}
+{"input":"count=12345","spans":[],"must_redact":false}
+{"input":"version=1.2.3","spans":[],"must_redact":false}
+{"input":"retries=3 timeout=30","spans":[],"must_redact":false}
+{"input":"id 1234567890123","spans":[],"must_redact":false}
+{"input":"port 8080 to 9090","spans":[],"must_redact":false}
+{"input":"getUserByName123","spans":[],"must_redact":false}
+{"input":"aaaaaaaaaaaaaaaa","spans":[],"must_redact":false}
+{"input":"internal-service.prod.us-east-1.example.com","spans":[],"must_redact":false}
+{"input":"api.github.com/repos/foo/bar","spans":[],"must_redact":false}
+{"input":"password rotation policy document","spans":[],"must_redact":false}
+{"input":"please rotate the api key next week","spans":[],"must_redact":false}
+{"input":"/nix/store/objects/aee0adc5b8c27b52d527317dff38af371598ce5b3d3ee5d1337425486cde9d81","spans":[],"must_redact":false,"kind":"path"}
+{"input":"/home/user/project/src/main.go","spans":[],"must_redact":false,"kind":"path"}
+{"input":"/var/cache/12345678-1234-1234-1234-123456789abc/data","spans":[],"must_redact":false,"kind":"path"}

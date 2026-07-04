@@ -165,46 +165,56 @@ func TestContextualAllowlistDoesNotBypassRealSecret(t *testing.T) {
 	}
 }
 
-// TestCRCSaltedAndStable checks the CRC properties CONTRACTS.md calls out
-// explicitly: same secret + same salt -> same crc; same secret + different
-// salt -> different crc; crc is stable/deterministic across repeated calls;
-// and the crc changes with a single-byte value change.
-func TestCRCSaltedAndStable(t *testing.T) {
+// TestMarkerChecksumSaltedAndStable checks the salted-checksum properties: same
+// secret + same salt -> same checksum; same secret + different salt ->
+// different checksum; checksum is stable/deterministic across repeated calls;
+// and it changes with a single-byte value change.
+func TestMarkerChecksumSaltedAndStable(t *testing.T) {
 	salt1 := []byte("salt-numero-uno-aaaaaaaaaaaaaaaa")
 	salt2 := []byte("salt-numero-dos-bbbbbbbbbbbbbbbbb")
 
-	c1 := crc16CCITTFalse("AKIAABCDEFGHIJKLMNO", salt1)
-	c1b := crc16CCITTFalse("AKIAABCDEFGHIJKLMNO", salt1)
+	c1 := markerChecksum("AKIAABCDEFGHIJKLMNO", salt1)
+	c1b := markerChecksum("AKIAABCDEFGHIJKLMNO", salt1)
 	if c1 != c1b {
-		t.Fatalf("CRC not stable/deterministic: %x vs %x", c1, c1b)
+		t.Fatalf("checksum not stable/deterministic: %x vs %x", c1, c1b)
 	}
 
-	c2 := crc16CCITTFalse("AKIAABCDEFGHIJKLMNO", salt2)
+	c2 := markerChecksum("AKIAABCDEFGHIJKLMNO", salt2)
 	if c1 == c2 {
-		t.Errorf("CRC identical across different salts (salt not load-bearing): %x", c1)
+		t.Errorf("checksum identical across different salts (salt not load-bearing): %x", c1)
 	}
 
-	c3 := crc16CCITTFalse("AKIAABCDEFGHIJKLMNP", salt1) // last char differs
+	c3 := markerChecksum("AKIAABCDEFGHIJKLMNP", salt1) // last char differs
 	if c1 == c3 {
-		t.Errorf("CRC identical for different values under the same salt: %x", c1)
+		t.Errorf("checksum identical for different values under the same salt: %x", c1)
 	}
 
 	// Empty salt must be rejected at the Pipeline level (already tested in
-	// options_test.go), but crc16CCITTFalse itself must not panic on a nil
+	// options_test.go), but markerChecksum itself must not panic on a nil
 	// salt slice (defense in depth for any future internal caller).
-	_ = crc16CCITTFalse("x", nil)
+	_ = markerChecksum("x", nil)
 }
 
-// TestCRC16CCITTFalseKnownVector checks crc16CCITTFalse against the
-// canonical CRC-16/CCITT-FALSE check value for the ASCII string
-// "123456789" (widely published check value: 0x29B1), confirming the
-// implementation is the standard variant (poly 0x1021, init 0xFFFF, no
-// input/output reflection) and not a subtly different CRC-16 flavor.
-func TestCRC16CCITTFalseKnownVector(t *testing.T) {
-	got := crc16CCITTFalse("123456789", nil)
-	want := uint16(0x29B1)
-	if got != want {
-		t.Errorf("crc16CCITTFalse(%q, nil) = %#04x, want %#04x (standard CRC-16/CCITT-FALSE check value)", "123456789", got, want)
+// TestMarkerChecksumNonAffine is the regression guard for the audit finding
+// that the old CRC-16 marker checksum was GF(2)-affine, which let the
+// per-ledger salt be recovered by linear algebra from known-plaintext markers.
+// A CRC satisfies the linear identity H(a)^H(b)^H(c) == H(a^b^c) for
+// equal-length inputs; a cryptographic hash does not. This asserts the
+// identity is BROKEN (the checksum is not linear).
+func TestMarkerChecksumNonAffine(t *testing.T) {
+	a := []byte("AAAAAAAAAAAAAAAA")
+	b := []byte("BBBBBBBBBBBBBBBB")
+	c := []byte("CCCCCCCCCCCCCCCC")
+	xor := make([]byte, len(a))
+	for i := range a {
+		xor[i] = a[i] ^ b[i] ^ c[i]
+	}
+	var salt []byte // the linearity relation over values is salt-independent
+	lhs := markerChecksum(string(a), salt) ^ markerChecksum(string(b), salt) ^ markerChecksum(string(c), salt)
+	rhs := markerChecksum(string(xor), salt)
+	if lhs == rhs {
+		t.Errorf("markerChecksum appears affine (H(a)^H(b)^H(c) == H(a^b^c) = %#08x); "+
+			"a linear checksum permits salt recovery — it must be a cryptographic hash", lhs)
 	}
 }
 

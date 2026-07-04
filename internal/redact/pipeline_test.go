@@ -15,7 +15,7 @@ func testPipeline(t *testing.T) *Pipeline {
 	return p
 }
 
-var markerRe = regexp.MustCompile(`⟦R:([a-z]+):([smlx]+):([0-9a-f]{4})⟧`)
+var markerRe = regexp.MustCompile(`⟦R:([a-z]+):([smlx]+):([0-9a-f]{8})⟧`)
 
 func TestRedactStructuralClasses(t *testing.T) {
 	p := testPipeline(t)

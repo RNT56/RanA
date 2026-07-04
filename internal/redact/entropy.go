@@ -88,18 +88,45 @@ func isDictionaryWord(s string) bool {
 	return ok
 }
 
-// looksBase64OrHex reports whether s is entirely composed of base64
-// alphabet characters (including padding) or hex digits, and is at least
-// 32 characters long — the length/shape bar from docs/REDACTION.md Stage 3
-// for base64/hex blobs.
-func looksBase64OrHex(s string) bool {
-	if len(s) < 32 {
-		return false
-	}
-	if isHexString(s) {
+// Blob length floors for the "high-entropy blob" shape rule (docs/REDACTION.md
+// Stage 3). These are deliberately asymmetric:
+//
+//   - Pure hex has a FIXED information rate of 4 bits/char (a 16-symbol
+//     alphabet), so a 16-char hex run already carries >= 64 bits and is
+//     effectively never benign in captured argv/prose. A whole-string Shannon
+//     AVERAGE understates that rate for short strings, which is exactly why a
+//     24-char random hex token (H ~= 3.5 bits/char) slipped under the old
+//     32-char / 4.0-bits bar and leaked. Hex is caught structurally at >= 16.
+//
+//   - The base64 alphabet OVERLAPS ordinary identifiers (MixedCaseName123 is
+//     "base64"), so a short base64 run cannot be redacted on shape alone
+//     without destroying benign identifiers. It must be longer AND clear the
+//     Shannon bar. A bare < 24-char base64 secret with no keyword context is a
+//     documented residual (LIMITS.md / docs/REDACTION.md).
+const (
+	blobMinHexLen    = 16
+	blobMinBase64Len = 24
+	// blobMinHexEntropy is a low Shannon floor applied even to hex runs, so a
+	// degenerate run of a single repeated hex character ("aaaa…", "0000…") —
+	// which carries no secret — is not redacted by the hex shape rule. A real
+	// random hex token of >= 16 chars measures ~3.5-4.0 bits/char; a repeated
+	// or 2-symbol run measures well under 3.0.
+	blobMinHexEntropy = 3.0
+)
+
+// looksHighEntropyBlob reports whether s qualifies as a high-entropy secret by
+// its shape alone: a hex run of >= blobMinHexLen (with at least some symbol
+// diversity), or a base64/alphanumeric run of >= blobMinBase64Len that also
+// clears the Shannon bar. See the const block above for why the two alphabets
+// get different floors.
+func looksHighEntropyBlob(s string) bool {
+	if isHexString(s) && len(s) >= blobMinHexLen && shannonEntropy(s) >= blobMinHexEntropy {
 		return true
 	}
-	return isBase64String(s)
+	if len(s) >= blobMinBase64Len && isBase64String(s) && shannonEntropy(s) >= 4.0 {
+		return true
+	}
+	return false
 }
 
 func isHexString(s string) bool {
@@ -137,17 +164,17 @@ func isBase64String(s string) bool {
 	return true
 }
 
-// hexOrBase64Runs scans s for every maximal run of hex digits or base64
-// alphabet characters and returns the [start,end) byte range of each one
-// found that is at least minLen characters. This backs the "base64/hex
-// blobs >= 32 chars" clause of docs/REDACTION.md Stage 3 for blobs embedded
-// inside a larger token (e.g. a hex digest immediately followed by a file
-// extension, or two independent blobs joined by a non-delimiter separator
-// like '!'), where the whole-token shape check in looksBase64OrHex would
-// otherwise fail because of interleaved non-blob characters. Returning
-// every qualifying run (not just the longest) is what makes redaction catch
-// N separate embedded secrets in one token, not only the biggest one.
-func hexOrBase64Runs(s string, minLen int) [][2]int {
+// highEntropyRuns scans s for every maximal run of hex/base64 alphabet
+// characters and returns the [start,end) byte range of each one that
+// looksHighEntropyBlob. This backs the "base64/hex blobs" clause of
+// docs/REDACTION.md Stage 3 for blobs embedded inside a larger token (e.g. a
+// hex digest immediately followed by a file extension, or two independent
+// blobs joined by a non-delimiter separator like '!'), where the whole-token
+// shape check would otherwise fail because of interleaved non-blob characters.
+// Returning every qualifying run (not just the longest) is what makes
+// redaction catch N separate embedded secrets in one token, not only the
+// biggest one.
+func highEntropyRuns(s string) [][2]int {
 	isRunChar := func(c byte) bool {
 		switch {
 		case c >= '0' && c <= '9':
@@ -172,15 +199,12 @@ func hexOrBase64Runs(s string, minLen int) [][2]int {
 		for j < len(s) && isRunChar(s[j]) {
 			j++
 		}
-		if j-i >= minLen {
-			// Require the run itself to actually look hex or base64 (the
-			// character class above is deliberately loose so runs like
-			// "abc-def_ghi" aren't silently excluded from consideration,
-			// but the final run must satisfy the real shape check).
-			run := s[i:j]
-			if isHexString(run) || isBase64String(run) {
-				runs = append(runs, [2]int{i, j})
-			}
+		// looksHighEntropyBlob enforces the per-alphabet length + Shannon
+		// floors; it also confirms the run is genuinely hex or base64 (the
+		// char class above is deliberately loose so runs like "abc-def_ghi"
+		// aren't excluded from consideration before the real shape check).
+		if run := s[i:j]; looksHighEntropyBlob(run) {
+			runs = append(runs, [2]int{i, j})
 		}
 		i = j
 	}
@@ -198,14 +222,14 @@ func isHighEntropyToken(s string, minLen int, bitsPerChar float64) bool {
 		return false
 	}
 	if isUUIDv4Shape(s) {
-		// Contextual allowlist per docs/REDACTION.md Stage 3 / CONTRACTS.md:
-		// "UUIDs vs4 shape" is a named benign near-miss shape distinct from
-		// an arbitrary base64/hex blob of similar length, applied wherever
-		// a candidate token is evaluated (both RedactPath's per-segment
-		// pass and the general entropy pass share this helper).
+		// Contextual allowlist per docs/REDACTION.md Stage 3: a canonical
+		// version-4 UUID is a named benign near-miss shape distinct from an
+		// arbitrary base64/hex blob of similar length, applied wherever a
+		// candidate token is evaluated (both RedactPath's per-segment pass and
+		// the general entropy pass share this helper).
 		return false
 	}
-	if looksBase64OrHex(s) && len(s) >= 32 {
+	if looksHighEntropyBlob(s) {
 		return true
 	}
 	if len(s) < minLen {

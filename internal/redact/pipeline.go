@@ -1,9 +1,12 @@
 package redact
 
 import (
+	"encoding/binary"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"lukechampine.com/blake3"
 )
 
 // markerPattern matches a complete typed-replacement marker
@@ -13,7 +16,7 @@ import (
 // already-redacted marker on a second pass (the marker text itself looks
 // like a plausible high-entropy/credential-shaped value), breaking
 // idempotency and burning through the salted-CRC budget for no reason.
-var markerPattern = regexp.MustCompile(`^⟦R:[a-z]+:[smlx]+:[0-9a-f]{4}⟧$`)
+var markerPattern = regexp.MustCompile(`^⟦R:[a-z]+:[smlx]+:[0-9a-f]{8}⟧$`)
 
 // markerPatternGlobal is the unanchored form of markerPattern, used to find
 // every already-present marker span inside an arbitrary string so it can be
@@ -22,7 +25,7 @@ var markerPattern = regexp.MustCompile(`^⟦R:[a-z]+:[smlx]+:[0-9a-f]{4}⟧$`)
 // whitespace boundary) that would otherwise let the entropy tokenizer's
 // token span straddle across the marker's own ':' separators and mangle it
 // on a second pass.
-var markerPatternGlobal = regexp.MustCompile(`⟦R:[a-z]+:[smlx]+:[0-9a-f]{4}⟧`)
+var markerPatternGlobal = regexp.MustCompile(`⟦R:[a-z]+:[smlx]+:[0-9a-f]{8}⟧`)
 
 // Pipeline is a compiled, salted redaction pipeline (docs/REDACTION.md
 // Stages 2-4). A Pipeline is safe for concurrent use by multiple goroutines
@@ -140,12 +143,29 @@ func filterOverlapping(spans, against []span) []span {
 	return out
 }
 
-// RedactArgv redacts each element of argv independently, matching how a
-// kernel-captured argv vector arrives (per-element, no cross-element
-// joining of a secret split across an argv boundary).
+// credentialFlagRe matches an argv element that is a bare credential-bearing
+// flag (long form, no attached "=value"): the value is then in the FOLLOWING
+// element, where no in-string keyword is visible to the entropy/structural
+// passes. Single-char short flags (-p) are deliberately excluded — they are
+// too ambiguous (a port, a pattern) to redact their operand safely, so a
+// short-flag-split credential is a documented residual.
+var credentialFlagRe = regexp.MustCompile(`(?i)^--?(?:password|passwd|pwd|passphrase|passcode|secret|secret-?key|client-?secret|private-?key|token|api-?key|apikey|access-?key|access-?token|auth-?token|auth-?key|bearer-?token|credentials?|pin|otp)$`)
+
+// RedactArgv redacts a kernel-captured argv vector. Each element is redacted
+// on its own (a secret is usually self-contained in one element), with ONE
+// cross-element rule: when an element is a bare credential flag (e.g.
+// "--password"), the NEXT element is its value and is redacted wholesale —
+// otherwise a secret split as ["--password", "s3cr3t"] leaks, because the
+// keyword the structural/entropy passes rely on lives in the previous element.
 func (p *Pipeline) RedactArgv(argv []string) []Redacted {
 	out := make([]Redacted, len(argv))
 	for i, a := range argv {
+		if i > 0 && a != "" && !markerPattern.MatchString(a) &&
+			!strings.HasPrefix(a, "-") && credentialFlagRe.MatchString(argv[i-1]) {
+			// Operand of a credential flag: the whole element is the secret.
+			out[i] = Redacted(p.marker(a, classEntropy))
+			continue
+		}
 		out[i] = p.Redact(a)
 	}
 	return out
@@ -188,10 +208,20 @@ func (p *Pipeline) RedactPath(pth string) Redacted {
 }
 
 // classifyPathContext returns, per segment index, whether that segment is
-// contextually allowlisted from the entropy pass: a 40- or 64-hex segment
-// under ".git/objects" (the classic two-char/rest split, matched on the
-// full remainder) or under a directory literally named "objects" or
-// "commits", or a version-4-shaped UUID segment anywhere.
+// contextually allowlisted from the entropy pass: a hash-length hex segment
+// under a directory named "objects" or "commits" (git, nix, ostree and other
+// content-addressed stores — extremely common in agent workspaces, where
+// redacting every content hash would destroy the forensic value of the path),
+// or a strict RFC-4122 version-4 UUID segment anywhere.
+//
+// This allowlist is a deliberate precision trade-off with a documented blind
+// spot (LIMITS.md §"redaction"): a secret an attacker CRAFTS to look like a
+// hash-length hex file under an "objects"/"commits" directory in a PATH field
+// (path_source=claimed), or as a valid-v4-nibble UUID, escapes the entropy
+// pass. That is preferred over the ~18% benign-path over-redaction that
+// tightening to the exact ".git" layout would cause. Structural provider
+// patterns (Stage 2) still run on allowlisted segments, so a literal AKIA…/
+// sk-… secret embedded in such a segment is still caught.
 func classifyPathContext(segments []string) map[int]bool {
 	allow := make(map[int]bool)
 	for i, seg := range segments {
@@ -209,7 +239,7 @@ func classifyPathContext(segments []string) map[int]bool {
 				continue
 			}
 			// generic: any ancestor directory literally named "objects" or
-			// "commits" contextually allowlists a hex blob under it.
+			// "commits" contextually allowlists a hash-length hex blob under it.
 			for j := i - 1; j >= 0; j-- {
 				if segments[j] == "objects" || segments[j] == "commits" {
 					allow[i] = true
@@ -221,26 +251,43 @@ func classifyPathContext(segments []string) map[int]bool {
 	return allow
 }
 
-// isUUIDv4Shape reports whether s has the canonical
-// 8-4-4-4-12 hyphenated hex UUID shape (version nibble not enforced beyond
-// the standard grouping, since kernel/path sources commonly present
-// UUIDv1/v4/v5 alike and the allowlist is about shape, not strict RFC 4122
-// version compliance).
+// isUUIDv4Shape reports whether s is a canonical RFC-4122 version-4 UUID:
+// the 8-4-4-4-12 hyphenated hex grouping AND the version nibble (first char of
+// the 3rd group) == '4' AND the variant nibble (first char of the 4th group)
+// in {8,9,a,b}. Enforcing the version/variant nibbles (not just the grouping)
+// shrinks the allowlist's blind spot ~64x: a random secret shaped like a UUID
+// now has only a ~1/64 chance of also carrying valid v4 nibbles. A non-v4
+// UUID (v1/v5) is not allowlisted, but is not over-redacted either — with '-'
+// not a token delimiter it stays one token whose Shannon entropy is below the
+// bar, so it passes through untouched.
 func isUUIDv4Shape(s string) bool {
 	if len(s) != 36 {
 		return false
 	}
-	for i, c := range s {
+	isHex := func(c byte) bool {
+		return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+	}
+	for i := 0; i < len(s); i++ {
 		switch i {
 		case 8, 13, 18, 23:
-			if c != '-' {
+			if s[i] != '-' {
 				return false
 			}
 		default:
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			if !isHex(s[i]) {
 				return false
 			}
 		}
+	}
+	// Version nibble (index 14) must be '4'.
+	if s[14] != '4' {
+		return false
+	}
+	// Variant nibble (index 19) must be one of 8, 9, a/A, b/B.
+	switch s[19] {
+	case '8', '9', 'a', 'b', 'A', 'B':
+	default:
+		return false
 	}
 	return true
 }
@@ -260,6 +307,9 @@ func (p *Pipeline) structuralSpans(s string) []span {
 				continue
 			}
 			if markerPattern.MatchString(s[start:end]) {
+				continue
+			}
+			if pat.validate != nil && !pat.validate(s[start:end]) {
 				continue
 			}
 			out = append(out, span{start: start, end: end, class: pat.class, structural: true})
@@ -282,8 +332,23 @@ func (p *Pipeline) structuralSpans(s string) []span {
 // character diversity.
 func (p *Pipeline) entropySpans(s string, existing []span) []span {
 	var out []span
+	// Token delimiters. Beyond whitespace/=/:/ (the documented base set), '.'
+	// ',' ';' '@' '|' are delimiters too. This is load-bearing in BOTH
+	// directions: it stops a dotted FQDN ("svc.prod.example.com") from being
+	// scored as ONE high-diversity token and over-redacted whole (which would
+	// destroy the hostname a net.dns/net.connect event exists to record), and
+	// it stops a real secret glued to a benign label by '.'/','/'@' from
+	// having its per-char entropy diluted below the bar and leaking. None of
+	// these characters is in the hex/base64 alphabet, so splitting on them
+	// never fractures a hex/base64 secret; structural secrets that legitimately
+	// contain them (JWTs, connection strings) are matched in Stage 2 first and
+	// excluded from this pass.
 	isDelim := func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '=' || r == ':' || r == '/'
+		switch r {
+		case ' ', '\t', '\n', '\r', '=', ':', '/', '.', ',', ';', '@', '|':
+			return true
+		}
+		return false
 	}
 	start := -1
 	flush := func(end int) {
@@ -301,17 +366,16 @@ func (p *Pipeline) entropySpans(s string, existing []span) []span {
 			return
 		}
 		// The whole token didn't qualify (e.g. a hex digest with a file
-		// extension glued on, "<40-hex>.dat", whose combined alphabet
-		// dilutes Shannon entropy below the bar and whose non-hex suffix
-		// breaks the whole-token hex/base64 shape check; or two independent
-		// blobs joined by a non-delimiter separator like '!'). Fall back to
-		// scanning for every embedded hex/base64 run of length >= 32 within
-		// the token and flag each one — this is what makes
-		// docs/REDACTION.md's separate "base64/hex blobs >= 32" clause
-		// actually fire on blobs embedded in a larger token, not only on
+		// extension glued on via a non-delimiter separator like '!', whose
+		// combined alphabet dilutes Shannon entropy below the bar and whose
+		// non-hex suffix breaks the whole-token shape check; or two independent
+		// blobs joined by such a separator). Fall back to scanning for every
+		// embedded high-entropy hex/base64 run within the token and flag each
+		// one — this is what makes docs/REDACTION.md's separate "base64/hex
+		// blobs" clause fire on blobs embedded in a larger token, not only on
 		// tokens that are purely a blob and nothing else, and catches every
 		// such blob rather than only the single longest one.
-		for _, run := range hexOrBase64Runs(tok, 32) {
+		for _, run := range highEntropyRuns(tok) {
 			runText := tok[run[0]:run[1]]
 			if isDictionaryWord(runText) || isUUIDv4Shape(runText) {
 				continue
@@ -409,10 +473,10 @@ func (p *Pipeline) applySpans(s string, spans []span) string {
 	return b.String()
 }
 
-// marker builds the typed-replacement string ⟦R:<class>:<lenclass>:<crc>⟧
+// marker builds the typed-replacement string ⟦R:<class>:<lenclass>:<checksum>⟧
 // for a redacted value, per docs/REDACTION.md §4.
 func (p *Pipeline) marker(value, class string) string {
-	return fmt.Sprintf("⟦R:%s:%s:%04x⟧", class, lenClass(len(value)), crc16CCITTFalse(value, p.salt))
+	return fmt.Sprintf("⟦R:%s:%s:%08x⟧", class, lenClass(len(value)), markerChecksum(value, p.salt))
 }
 
 // lenClass buckets a redacted span's length into s/m/l/xl so the exact
@@ -430,25 +494,30 @@ func lenClass(n int) string {
 	}
 }
 
-// crc16CCITTFalse computes CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no
-// reflect, no xorout) over value‖salt, per docs/REDACTION.md §4.
-func crc16CCITTFalse(value string, salt []byte) uint16 {
-	var crc uint16 = 0xFFFF
-	update := func(b byte) {
-		crc ^= uint16(b) << 8
-		for i := 0; i < 8; i++ {
-			if crc&0x8000 != 0 {
-				crc = (crc << 1) ^ 0x1021
-			} else {
-				crc <<= 1
-			}
-		}
-	}
-	for i := 0; i < len(value); i++ {
-		update(value[i])
-	}
-	for _, b := range salt {
-		update(b)
-	}
-	return crc
+// markerChecksum is the salted correlation checksum embedded in a marker: the
+// low 32 bits of BLAKE3(value ‖ salt).
+//
+// It replaced a CRC-16/CCITT-FALSE over the same input. That change fixes two
+// audit findings at once (docs/REDACTION.md §4):
+//
+//   - A CRC is GF(2)-AFFINE in every input bit, including the salt's, so each
+//     marker leaked one linear equation over the salt bits; with enough
+//     known-plaintext markers the per-ledger salt was recoverable by Gaussian
+//     elimination. BLAKE3 is a cryptographic hash — not affine — so the salt
+//     cannot be recovered by linear algebra, and a marker is a genuine one-way
+//     tag over its value.
+//   - The old checksum was 16 bits, so two different secrets of the same
+//     class/length collided into an identical marker at ~1/65536 — frequent
+//     enough in a busy ledger to produce a FALSE "same secret was reused here
+//     and here" inference. 32 bits drops that to ~1/4e9, so the correlation
+//     hint the marker provides is reliable.
+//
+// A nil/empty salt is rejected at the Pipeline level (ErrEmptySalt); this
+// function itself is total and never panics on a nil salt.
+func markerChecksum(value string, salt []byte) uint32 {
+	h := blake3.New(32, nil)
+	_, _ = h.Write([]byte(value))
+	_, _ = h.Write(salt)
+	sum := h.Sum(nil)
+	return binary.BigEndian.Uint32(sum[:4])
 }

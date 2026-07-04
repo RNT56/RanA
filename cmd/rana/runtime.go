@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/RNT56/RanA/internal/redact"
 )
 
 // svcSocketPath is where the session service (svc) binds the ranad socket and
@@ -63,11 +65,20 @@ func workingDir() string {
 
 // hostFingerprint records the host context stamped into session.start
 // (os/arch/rana version). It carries no secrets — only static, non-sensitive
-// environment facts — and no captured agent data.
+// program-controlled facts — and no captured agent data.
+//
+// The values are wrapped in redact.Literal because they land in the
+// session.start event's Data["host"] map, and the canonical encoder accepts a
+// string value only as redact.Redacted or an exempt enum type (invariant 2):
+// a plain string here makes the whole session.start event fail to encode with
+// ErrRawString, silently dropping the session-anchoring event. redact.Literal
+// is the correct mechanism for program constants (runtime.GOOS/GOARCH are
+// compile-time constants; version is a build-injected program constant) — none
+// is captured agent data, so none needs the pipeline.
 func hostFingerprint() map[string]any {
 	return map[string]any{
-		"os":      runtime.GOOS,
-		"arch":    runtime.GOARCH,
-		"version": version,
+		"os":      redact.Literal(runtime.GOOS),
+		"arch":    redact.Literal(runtime.GOARCH),
+		"version": redact.Literal(version),
 	}
 }

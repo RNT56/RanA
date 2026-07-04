@@ -62,17 +62,21 @@ Entropy is computed over the candidate token or path segment only, so ordinary p
 A redacted span is replaced with a structured marker that preserves *type* and *shape* for analysis while leaking nothing:
 
 ```
-⟦R:<class>:<lenclass>:<crc>⟧
+⟦R:<class>:<lenclass>:<checksum>⟧
 ```
 
 - `class` ∈ `{ awskey, gcpkey, openaikey, anthropickey, ghtoken, slacktoken, stripekey, jwt, pem, bearer, connstring, entropy }`
 - `lenclass` ∈ `{ s, m, l, xl }` (bucketed length — never the exact length, which can itself be identifying)
-- `crc` = `CRC16( value ‖ per-ledger-random-salt )`
+- `checksum` = the low **32 bits** of `BLAKE3( value ‖ per-ledger-random-salt )`, rendered as 8 hex characters
 
-**Why the salted CRC:**
-- Two identical secrets *within one ledger* produce the same `crc`, so an analyst can see "the same token was used in these three places" — useful signal.
-- The `crc` is **useless across ledgers** (different salt) and **non-invertible** (16 bits over a salted input reveals nothing about the value).
-- The salt lives with the ledger and is **never exported** (`docs/TRUST.md §7`), so redaction markers in a shared export cannot be correlated even by the person who made them.
+**Why the salted checksum:**
+- Two identical secrets *within one ledger* produce the same `checksum`, so an analyst can see "the same token was used in these three places" — a useful correlation hint. At 32 bits, two *different* values collide into the same marker only ~1 in 4 billion times, so the hint is reliable rather than birthday-prone (a 16-bit checksum collided at ~1/65536 — frequent enough in a busy ledger to fabricate a "reused credential" inference).
+- The checksum is a **truncated cryptographic hash keyed by a per-ledger random salt**, so it is useless across ledgers (different salt) and exposes **no algebraic structure**. This is a deliberate choice over a CRC: a CRC is GF(2)-affine, so each marker would leak one linear equation over the salt bits and the salt could be recovered by Gaussian elimination from enough known-plaintext markers. A BLAKE3 truncation is not linearly invertible.
+
+**What a marker does and does not protect (honest scope):**
+- The salt lives with the ledger and is **never exported** (`docs/TRUST.md §7`). A recipient of a shared export who does **not** have the salt cannot correlate a marker back to a candidate value, and cannot correlate the same *unknown* value across two exports made with different salts.
+- A marker does **not** hide that the same value appears twice *within one export* — identical value → identical marker, by design (that is the correlation feature).
+- A marker is **not** a commitment scheme. Against someone who holds the salt (the exporter always retains it, and a same-uid attacker can read it), a marker is a 32-bit oracle: a guessed low-entropy value can be confirmed by recomputing the checksum. The real secrecy guarantee is that **the raw value never leaves `ranad` RAM** — not that the marker is unguessable. (`LIMITS.md`.)
 
 ## The corpus method (gate G4)
 
@@ -85,4 +89,10 @@ A redacted span is replaced with a structured marker that preserves *type* and *
 
 ## Residual risk (stated, not hidden)
 
-The ≤1% is real and lives in `LIMITS.md §4`: secrets embedded in exotic file *paths* with low per-segment entropy, and genuinely novel credential formats before their pattern is added. What can **never** leak: environment values (never captured) and already-redacted spans (raw bytes never leave `ranad` RAM). If a threat model can't tolerate the path-embedded residual, don't point digest scopes at directories containing such paths.
+The residual is real and enumerated in `LIMITS.md §4`. In short:
+
+- **Context-free short values.** A bare secret with no adjacent keyword and too little structure to detect — a lone 4–6 digit PIN/OTP (`483920`), or a bare base64 token under ~24 chars — cannot be redacted without also redacting every benign number and short identifier, which would gut the timeline. *Labelled* short secrets (`pin=…`, `otp=…`, `card …`, `--password …`) are caught structurally; the bare, contextless case is the limit.
+- **Path-shaped allowlist blind spot.** The entropy pass allowlists content-addressed path segments (`…/objects/<hash>`, valid-v4 UUIDs) to avoid shredding the very paths a file event exists to record. A secret an attacker *crafts* to look like one of those, and places in a `path_source=claimed` field, escapes the entropy pass (structural provider patterns still run).
+- **Novel formats** before their structural pattern is added — the entropy net catches most; misses are catalogued and become permanent corpus rows.
+
+What can **never** leak: environment values (never captured), and already-redacted spans (raw bytes never leave `ranad` RAM). If a threat model can't tolerate the path-embedded residual, don't point digest scopes at directories containing such paths.

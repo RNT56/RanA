@@ -46,21 +46,29 @@ func TestIsDictionaryWord(t *testing.T) {
 	}
 }
 
-func TestLooksBase64OrHex(t *testing.T) {
+func TestLooksHighEntropyBlob(t *testing.T) {
 	tests := []struct {
 		s    string
 		want bool
 	}{
 		{"5f3759df8b1acffe6e6a1e2b3c4d5e6f", true},     // 32 hex chars
-		{"aGVsbG8gd29ybGQgdGhpcyBpcyBhIHRlc3Q=", true}, // base64, >=32
+		{"aGVsbG8gd29ybGQgdGhpcyBpcyBhIHRlc3Q=", true}, // base64, >=24, high H
 		{"short", false},
-		{"/usr/lib/x86_64-linux-gnu", false},
 		{"0123456789abcdef0123456789abcdef", true}, // 32 hex
+		// Recalibration: pure-hex is caught at >= 16 chars (fixed 4 bits/char),
+		// the class of sub-32 secret that used to leak.
+		{"7dcef58168aa53f9d9a06afe", true}, // 24 hex
+		{"a1b2c3d4e5f60718", true},         // 16 hex
+		{"a1b2c3d4e5f607", false},          // 14 hex, below the hex floor
+		// Base64 needs the longer floor AND the Shannon bar, so a short
+		// structured identifier is NOT redacted on shape alone.
+		{"getUserByName123", false},         // 16-char identifier, below base64 floor
+		{"aaaaaaaaaaaaaaaaaaaaaaaa", false}, // 24 chars but ~0 entropy
 	}
 	for _, tt := range tests {
 		t.Run(tt.s, func(t *testing.T) {
-			if got := looksBase64OrHex(tt.s); got != tt.want {
-				t.Errorf("looksBase64OrHex(%q) = %v, want %v", tt.s, got, tt.want)
+			if got := looksHighEntropyBlob(tt.s); got != tt.want {
+				t.Errorf("looksHighEntropyBlob(%q) = %v, want %v", tt.s, got, tt.want)
 			}
 		})
 	}

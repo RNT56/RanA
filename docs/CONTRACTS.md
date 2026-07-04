@@ -255,14 +255,16 @@ by construction, no raw captured string can reach a ledger leaf hash. Trust core
    no raw string can reach a leaf by construction (CLAUDE.md §6 invariant 2).
 3. **No flag disables redaction**; options can only tighten the entropy bar or
    add patterns.
-4. Every replaced span becomes a typed marker `⟦R:<class>:<lenclass>:<crc>⟧`
-   where the CRC is **salted** per-ledger; markers are idempotent (redacting a
-   marker is a no-op) and a mutated marker is detectable.
+4. Every replaced span becomes a typed marker
+   `⟦R:<class>:<lenclass>:<checksum>⟧` where the checksum is the low 32 bits of
+   a **salted BLAKE3** over the value (per-ledger salt; not a CRC — a CRC is
+   affine and would leak the salt); markers are idempotent (redacting a marker
+   is a no-op) and a mutated marker is detectable.
 5. The **class set is closed** (docs/REDACTION.md §4: awskey, gcpkey, openai,
    anthropic, ghtoken, slack, stripe, jwt, pem, bearer, connstring, entropy);
    new providers fold into an existing class, never a new one.
 6. The pipeline is immutable post-construction and concurrency-safe;
-   identical input yields byte-identical output (deterministic salted CRC).
+   identical input yields byte-identical output (deterministic salted checksum).
 
 **Test contract.** The permanent **G4 corpus** (`test/redaction-corpus`, ≥520
 entries): recall ≥99% on must-redact rows, a benign false-positive ceiling, and

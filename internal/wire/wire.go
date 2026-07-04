@@ -118,6 +118,18 @@ type Head struct {
 
 func (*Head) frameTag() string { return "head" }
 
+// SessionEnd tells ranad that a recorded session has ended (its cgroup scope
+// emptied, or `rana stop`), so ranad can evict that session's per-session
+// collector state (rate-governor buckets, segment tracker, exe-provenance
+// seen-map) — otherwise a long-lived ranad accumulates one such entry per
+// session it ever observed. It travels the same svc->ranad reverse channel as
+// Head. It carries only the session id (an opaque ULID), never any content.
+type SessionEnd struct {
+	Session string // session id whose collector state ranad should release
+}
+
+func (*SessionEnd) frameTag() string { return "session_end" }
+
 // Bye signals a clean, intentional connection close.
 type Bye struct{}
 
@@ -151,11 +163,16 @@ type wireHead struct {
 
 type wireBye struct{}
 
+type wireSessionEnd struct {
+	Session string `cbor:"session"`
+}
+
 type wireEnvelope struct {
-	Hello *wireHello `cbor:"hello,omitempty"`
-	Ev    *wireEv    `cbor:"ev,omitempty"`
-	Head  *wireHead  `cbor:"head,omitempty"`
-	Bye   *wireBye   `cbor:"bye,omitempty"`
+	Hello      *wireHello      `cbor:"hello,omitempty"`
+	Ev         *wireEv         `cbor:"ev,omitempty"`
+	Head       *wireHead       `cbor:"head,omitempty"`
+	SessionEnd *wireSessionEnd `cbor:"session_end,omitempty"`
+	Bye        *wireBye        `cbor:"bye,omitempty"`
 }
 
 // WriteFrame encodes f as a length-prefixed canonical CBOR frame and writes
@@ -210,6 +227,8 @@ func toEnvelope(f Frame) (wireEnvelope, error) {
 			CkptHash:  ck,
 			At:        v.Report.At,
 		}}, nil
+	case *SessionEnd:
+		return wireEnvelope{SessionEnd: &wireSessionEnd{Session: v.Session}}, nil
 	case *Bye:
 		return wireEnvelope{Bye: &wireBye{}}, nil
 	default:
@@ -284,6 +303,10 @@ func fromEnvelope(env wireEnvelope) (Frame, error) {
 		copy(hd.Report.ChainHead[:], env.Head.ChainHead)
 		copy(hd.Report.CkptHash[:], env.Head.CkptHash)
 		f = &hd
+	}
+	if env.SessionEnd != nil {
+		set++
+		f = &SessionEnd{Session: env.SessionEnd.Session}
 	}
 	if env.Bye != nil {
 		set++

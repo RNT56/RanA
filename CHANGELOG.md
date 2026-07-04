@@ -2,6 +2,21 @@
 
 All notable changes to RanA and its binding plan. Format: [Keep a Changelog](https://keepachangelog.com/). Plan amendments are versioned per the plan's own rule (§Status).
 
+## [Unreleased] — 2026-07-04 (security hardening & leak closure)
+
+Implementation hardening (no binding-decision changes) following an adversarial security self-assessment of RanA-as-installed-software.
+
+### Security fixes
+- **ranad peer-auth (HIGH).** ranad, as the client dialing svc's socket, verified only that its `SO_PEERCRED` call *succeeded* and discarded the uid — a hijacked/stale socket at that path could impersonate svc, receive the salt + event stream, and plant forged `heads.log` entries (defeating D27). ranad now requires the peer uid to equal the socket file's owner before the handshake.
+- **exportverify overflow (MEDIUM).** A near-`uint64`-max uvarint length in a hostile `checkpoints.cbor` wrapped `int()` negative, bypassed the bounds check, and panicked — crashing the WASM/browser verifier. Now bounds-checked in `uint64` space, with adversarial tests at the overflow boundary.
+- **install signature (MEDIUM).** `get-rana.sh` checked only a same-source SHA256; it now runs `cosign verify-blob` when available and warns loudly otherwise.
+- **`verify --mirror` honesty (MEDIUM, P5/P10).** Reports `INCOMPLETE` (not a silent `OK`) when the heads mirror is absent, so "checked clean" can't be confused with "never ran."
+- Uid-namespaced the temp fallbacks for the svc run-dir and the signing-key datadir; enforced a real CSP on the WASM viewer; added a standing test that exports never embed the private key or salt; adopt auto-detect now requires a corroborating signal (config dir exists) before acting on a spoofable process name.
+
+### Leak closed
+- **ranad↔svc session-end wiring.** The deferred item from [Plan v1.2] is now built: a `wire.SessionEnd` frame is broadcast by svc after sealing a session, and ranad's outbound loop evicts that session's Governor / segTracker / exe-provenance state (surfacing any final governor gap as a normal gap event). A long-lived ranad no longer accumulates per-session state for every session it ever observed. `LIMITS.md §8` and `docs/ARCHITECTURE.md §3` updated to match.
+- Added `LIMITS.md §4a` documenting the honest limits of the Tier-2 shareable-artifact features.
+
 ## [Plan v1.2] — 2026-07-03 (post-implementation review)
 
 A multi-dimension architecture/robustness/security review of the complete, all-green implementation surfaced fixes and one settled design decision.

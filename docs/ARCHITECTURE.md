@@ -85,10 +85,11 @@ The split cuts both ways, and RanA accounts for it: the recorded agent usually r
      choice the original plan left open; it is settled here for the v1
      single-user target machine. **Open items** (tracked, not yet built):
      multi-user routing (one root `ranad` fanning events to several users'
-     svc sockets by cgid→uid), and a session-end signal on the ranad↔svc
-     wire so `ranad` can evict a finished session's Governor/segTracker/cgid
-     state (until then that state is bounded by distinct sessions over the
-     daemon's uptime — a slow, documented growth).
+     svc sockets by cgid→uid). The session-end eviction is now wired: svc
+     sends a `SessionEnd` frame after sealing, and `ranad`'s outbound loop
+     releases that session's Governor/segTracker/exe-provenance state (any
+     final governor gap is surfaced as a normal gap event), so a long-lived
+     daemon no longer accumulates state per session it ever observed.
 2. **`rana adopt <target>`** (long-running daemons)
    - Detect the target (e.g. OpenClaw gateway), generate a systemd drop-in placing its unit under `rana.slice`, confirm with the user, restart.
    - `--pid N` migrates a live tree instead; caveats (already-open fds predate the record; thread migration semantics) are written into session metadata honestly.

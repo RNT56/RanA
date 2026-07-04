@@ -205,6 +205,14 @@ type Pump struct {
 
 	headsLogDir   string
 	dnsJoinWindow time.Duration
+
+	// endedMu guards endedSessions: session ids received via a
+	// wire.SessionEnd frame on the inbound goroutine (PumpInbound) but drained
+	// and acted on by the outbound goroutine (DrainEndedSessions), so the
+	// governor's final-gap frame is built and sent from the same goroutine
+	// that owns Sink.Send (never racing the inbound reader).
+	endedMu       sync.Mutex
+	endedSessions []string
 }
 
 // NewPump constructs a Pump from cfg.
@@ -459,6 +467,43 @@ func (p *Pump) FlushGaps() []wire.Frame {
 	return frames
 }
 
+// DrainEndedSessions releases the per-session collector state for every
+// session ranad has been told (via a wire.SessionEnd frame) has ended:
+// governor rate-limit buckets, the segment tracker, and the Enricher's
+// exe-provenance seen-map. Without this, a long-lived ranad accumulates one
+// such set of state per session it ever observed (an unbounded, if slow,
+// memory growth). It is called by ranad's outbound loop — the goroutine that
+// owns Sink.Send — so that any final gap the governor surfaces on eviction
+// (un-flushed sheds from the session's last interval, P5) is returned here as
+// a wire.Ev frame for that same loop to send, never lost and never written
+// from the inbound goroutine. Returns nil frames when nothing was pending.
+func (p *Pump) DrainEndedSessions() []wire.Frame {
+	p.endedMu.Lock()
+	ended := p.endedSessions
+	p.endedSessions = nil
+	p.endedMu.Unlock()
+	if len(ended) == 0 {
+		return nil
+	}
+
+	var frames []wire.Frame
+	for _, session := range ended {
+		if final := p.governor.EndSession(session); final != nil {
+			idx := p.seg.Current(session)
+			ev := schema.NewGap(session, idx, idx, final.FromNs, final.ToNs, 0, final.Reason, final.Counts, final.FromNs, final.ToNs)
+			if body, err := cborcanon.EncodeEvent(ev); err == nil {
+				frames = append(frames, &wire.Ev{Event: body})
+			}
+		}
+		// Evict the remaining per-session state (safe map deletes). Order
+		// matters only in that the governor's final gap uses seg.Current
+		// above, so seg is evicted after.
+		p.seg.EndSession(session)
+		p.enricher.EndSession(session)
+	}
+	return frames
+}
+
 // ReconnectGap builds (but does not send) a gap{daemon_restart} frame for
 // session, using this Pump's Clock for the "resumed at" timestamp
 // (CONTRACTS §cmd/ranad: "on reconnect emit gap{daemon_restart}"). fromNs
@@ -503,6 +548,15 @@ func (p *Pump) PumpInbound() (int, error) {
 			return n, err
 		}
 		n++
+		if se, ok := f.(*wire.SessionEnd); ok {
+			// Queue for the outbound goroutine to act on (see endedSessions'
+			// doc comment): evicting the governor there lets its final gap be
+			// sent on the goroutine that owns Sink.Send.
+			p.endedMu.Lock()
+			p.endedSessions = append(p.endedSessions, se.Session)
+			p.endedMu.Unlock()
+			continue
+		}
 		head, ok := f.(*wire.Head)
 		if !ok {
 			continue

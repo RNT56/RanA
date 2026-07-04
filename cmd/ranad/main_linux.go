@@ -383,6 +383,14 @@ func outboundLoop(ctx context.Context, pump *Pump) error {
 				return err
 			}
 		}
+		// Release per-session collector state for sessions svc has reported
+		// ended (via inbound SessionEnd frames); any final governor gap comes
+		// back as a frame to send from this Send-owning goroutine.
+		for _, f := range pump.DrainEndedSessions() {
+			if err := pump.Sink().Send(f); err != nil {
+				return err
+			}
+		}
 
 		select {
 		case <-ctx.Done():

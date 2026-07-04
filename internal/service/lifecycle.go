@@ -128,5 +128,13 @@ func (s *Service) EmitSessionEnd() error {
 	if err := s.appendAndPublish(ev); err != nil {
 		return err
 	}
-	return s.writer.SealSession(s.cfg.Session)
+	if err := s.writer.SealSession(s.cfg.Session); err != nil {
+		return err
+	}
+	// Tell ranad the session is over so it releases that session's per-session
+	// collector state (governor/segment/exe-provenance maps). Best-effort and
+	// after the seal, so a dropped signal never affects the persisted record —
+	// only how promptly ranad reclaims memory (BroadcastSessionEnd's contract).
+	s.ranadServer.BroadcastSessionEnd(s.cfg.Session)
+	return nil
 }

@@ -123,11 +123,14 @@ processes is wired to its final form yet:
   concern, not runnable on the macOS dev host).
 - **Single-user by design (v1).** One root `ranad` feeding *multiple* users'
   session services by cgid→uid routing is a documented open item, not built.
-- **Long-lived-daemon session state.** `ranad`'s per-session rate-limit and
-  segment-tracking state is evicted by a session-end signal that is not yet
-  on the ranad↔svc wire, so over a machine's uptime that state grows with the
-  number of *distinct* sessions seen (bounded and slow, not per-event). Closed
-  by the wire-signal item in `CHANGELOG.md` [Plan v1.2].
+- **Long-lived-daemon session state — now bounded.** `ranad`'s per-session
+  rate-limit, segment-tracking, and exe-provenance state is released when svc
+  reports a session ended, via a `SessionEnd` frame on the ranad↔svc wire
+  (svc broadcasts it after sealing; ranad's outbound loop evicts the state and
+  surfaces any final governor gap). If ranad is disconnected when a session
+  ends, the state is reclaimed on its next restart (a fresh ranad carries no
+  accumulated state), so a dropped signal costs at most a bounded reclamation
+  delay, never correctness.
 
 These are wiring gaps between finished components, not missing guarantees: the
 trust properties in §1 hold for every event that reaches the ledger.

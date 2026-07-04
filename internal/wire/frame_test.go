@@ -388,3 +388,24 @@ func TestReadFrame_NonCanonicalUvarintRejected(t *testing.T) {
 		t.Fatalf("want ErrFrameTooLarge for canonical 1<<63, got %v", err)
 	}
 }
+
+// TestWriteReadFrame_SessionEndRoundTrip covers the svc->ranad session-end
+// signal frame (used to evict finished-session collector state).
+func TestWriteReadFrame_SessionEndRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := &SessionEnd{Session: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}
+	if err := WriteFrame(&buf, want); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
+	got, err := ReadFrame(&buf)
+	if err != nil {
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	se, ok := got.(*SessionEnd)
+	if !ok {
+		t.Fatalf("frame type = %T, want *SessionEnd", got)
+	}
+	if se.Session != want.Session {
+		t.Fatalf("Session = %q, want %q", se.Session, want.Session)
+	}
+}

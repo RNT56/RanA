@@ -100,6 +100,15 @@ func (c *ranadConn) SendHead(r chain.HeadReport) error {
 	return wire.WriteFrame(c.conn, &wire.Head{Report: toWireHeadReport(r)})
 }
 
+// SendSessionEnd tells this connection's ranad peer that a session has ended,
+// so ranad can release that session's per-session collector state. Best-effort
+// on the same reverse channel as SendHead; carries only the session id.
+func (c *ranadConn) SendSessionEnd(session string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return wire.WriteFrame(c.conn, &wire.SessionEnd{Session: session})
+}
+
 // toWireHeadReport converts a chain.HeadReport to wire's own identically-
 // shaped HeadReport type (internal/wire deliberately does not import
 // internal/chain — see wire.HeadReport's doc comment).
@@ -147,6 +156,24 @@ func (s *RanadServer) Broadcast(r chain.HeadReport) {
 
 	for _, c := range conns {
 		_ = c.SendHead(r) // best-effort: a HeadReport that fails to reach ranad still had its local durable side-effect (docs/TRUST.md heads.log fallback is svc's job, see digest.go's local mirror)
+	}
+}
+
+// BroadcastSessionEnd tells every registered ranad connection that session has
+// ended so ranad evicts its per-session collector state. Best-effort: if ranad
+// is not connected, the state is released the next time ranad restarts (a
+// fresh ranad has no accumulated state) — nothing is lost by a dropped signal
+// except a bounded delay in reclaiming memory.
+func (s *RanadServer) BroadcastSessionEnd(session string) {
+	s.mu.Lock()
+	conns := make([]*ranadConn, 0, len(s.conns))
+	for c := range s.conns {
+		conns = append(conns, c)
+	}
+	s.mu.Unlock()
+
+	for _, c := range conns {
+		_ = c.SendSessionEnd(session)
 	}
 }
 

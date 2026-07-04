@@ -535,3 +535,43 @@ func TestHeadsLogDirMustExist(t *testing.T) {
 		t.Fatal("heads.log should not have been created under a missing directory")
 	}
 }
+
+// TestPump_SessionEndEvictsPerSessionState proves the session-end wiring end
+// to end: a wire.SessionEnd frame received inbound causes DrainEndedSessions
+// (run by the outbound loop) to release that session's collector state —
+// observable here because the Enricher's cgid binding is dropped, so a later
+// record for that cgid is skipped as unknown rather than producing an event.
+func TestPump_SessionEndEvictsPerSessionState(t *testing.T) {
+	clk := newFakeClock(time.Unix(1000, 0))
+	p, src, sink := newTestPump(t, clk, 42, "sess1")
+
+	// Populate per-session state with one real event.
+	src.records = [][]byte{buildForkRecord(100, 1, 42, 111, 222)}
+	if _, err := p.Drain(); err != nil {
+		t.Fatalf("Drain (before end): %v", err)
+	}
+	if len(sink.Sent()) != 1 {
+		t.Fatalf("frames before end = %d, want 1", len(sink.Sent()))
+	}
+
+	// svc reports the session ended: PumpInbound queues it, DrainEndedSessions
+	// acts on it.
+	sink.mu.Lock()
+	sink.inbound = []wire.Frame{&wire.SessionEnd{Session: "sess1"}}
+	sink.mu.Unlock()
+	if _, err := p.PumpInbound(); err != nil {
+		t.Fatalf("PumpInbound: %v", err)
+	}
+	_ = p.DrainEndedSessions()
+
+	// A new record for the now-evicted cgid must be skipped (ErrUnknownCgid),
+	// producing no further frame — proof the cgid binding was released.
+	sentBefore := len(sink.Sent())
+	src.records = [][]byte{buildForkRecord(101, 1, 42, 333, 444)}
+	if _, err := p.Drain(); err != nil {
+		t.Fatalf("Drain (after end): %v", err)
+	}
+	if got := len(sink.Sent()); got != sentBefore {
+		t.Fatalf("a record for the evicted session produced a frame: sent %d, want %d", got, sentBefore)
+	}
+}

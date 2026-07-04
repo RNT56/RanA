@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# RanA marker hook for Cline — TaskComplete -> run.end (completed).
+# Cline discovers hooks by a file named exactly after the event and runs it with
+# the HookInput JSON on stdin. This wrapper just execs the shared implementation
+# (rana-marker.js), forwarding stdin and passing the event name as argv[2]. All
+# logic + the P7 allowlist live in rana-marker.js. Inert if RanA absent; never
+# blocks Cline (P2). Requires `node` on PATH (Cline is a Node app).
+exec node "$(dirname "$0")/rana-marker.js" TaskComplete

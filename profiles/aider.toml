@@ -1,6 +1,23 @@
 # RanA profile: aider
-# aider — terminal-based AI pair-programming CLI, typically invoked inside a
-# git working tree and driven directly from a shell.
+# aider (aider.chat, github.com/Aider-AI/aider) — terminal-based AI
+# pair-programming CLI. Python console-script named `aider`, run INSIDE a git
+# working tree and driven directly from a shell. It reads/edits/writes files in
+# that repo and auto-commits each change to git.
+#
+# WHY THIS PROFILE IS SIMPLE (no markers): aider has NO plugin, hook, or
+# lifecycle-notify mechanism. Its Python `Coder` API is explicitly unsupported /
+# undocumented (aider.chat/docs/scripting.html), `--message`/`--exit` are
+# one-shot batch flags, and `--notifications-command` fires PER-RESPONSE (when
+# the LLM awaits input), not at run start/end. There is no clean run.start /
+# run.end signal to emit, so RanA relies on the process tree + time for
+# causality here. This is a property of aider, not a gap in RanA.
+#
+# CAPTURE COMPLETENESS (P1): aider runs the model's shell commands — /run, and
+# the auto-lint/auto-test commands (--lint-cmd/--test-cmd) — as DIRECT CHILD
+# processes in the same cwd and the same cgroup slice. Those execs, their file
+# writes, and their egress are captured by inheritance. aider does not sandbox
+# into containers by default, so (unlike gateway agents) there is no
+# delegated-container blind spot for the common case.
 
 [profile]
 name        = "aider"
@@ -10,8 +27,8 @@ version     = 1
 [match]
 auto = true
 exe_basename = ["aider"]
-# aider is usually installed as a pip console-script named "aider"; the
-# argv_contains fallback below covers `python -m aider` invocations.
+# aider is normally the pip console-script `aider`; the argv_contains fallback
+# covers `python -m aider` invocations where the exe basename is `python`.
 argv_contains = ["aider"]
 
 [capture]
@@ -24,21 +41,46 @@ network_flow    = true
 unix_sockets    = true
 
 [digest]
-# aider's whole job is editing the repo it was started in.
+# aider's whole job is editing the repo it was started in, so the session cwd
+# is the durable-artifact scope.
 scopes = ["$SESSION_CWD/**"]
-exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**"]
+# Exclude non-artifact churn: VCS internals, dependency trees, AND aider's OWN
+# bookkeeping files, which all land in the git root and would otherwise swamp
+# the "what code did the agent change" signal. aider writes:
+#   .aider.chat.history.md   — running chat transcript (also P7-sensitive text)
+#   .aider.input.history     — user input log         (also P7-sensitive text)
+#   .aider.llm.history       — raw LLM I/O log         (P7-sensitive; never a durable artifact)
+#   .aider.tags.cache.v*/    — SQLite repomap cache (rebuilt, not an artifact)
+#   .env / .aider.conf.yml   — credential/config, handled by sensitive_read below
+exclude = [
+  "**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**",
+  "**/.aider.chat.history.md",
+  "**/.aider.input.history",
+  "**/.aider.llm.history",
+  "**/.aider.tags.cache.v*/**",
+  "**/.aider.tags.cache.v*",
+  "$SESSION_CWD/.env",
+]
 
 [sensitive_read]
+# aider's credential surface is mostly REPO-LOCAL: it loads `.env` from the git
+# root (API keys live there per aider's config docs) and both the repo-local and
+# home `.aider.conf.yml` can carry `openai-api-key` / `anthropic-api-key`. Reads
+# of these are the exfiltration precursor RanA exists to flag.
 extra = [
-  "~/.config/aider/**",   # aider's own config (model settings, API key files)
-  "~/.aider*",            # aider's dotfiles (history, input/chat cache) in $HOME
-  "~/.netrc",             # aider can fetch/push over HTTPS git remotes using this
-  "~/.config/gh/**",
-  "~/.npmrc",
+  "$SESSION_CWD/.env",              # aider's own .env loader — holds provider API keys
+  "$SESSION_CWD/.aider.conf.yml",   # repo-local config may carry api keys
+  "~/.aider.conf.yml",              # home-dir config may carry api keys
+  "~/.aider.model.settings.yml",    # per-model settings (may reference key material)
+  "~/.config/aider/**",             # aider's config dir (model settings, key files)
+  "~/.aider*",                      # aider dotfiles/caches in $HOME
+  "~/.netrc",                       # aider pushes/fetches over HTTPS git remotes with this
+  "~/.config/gh/**",                # gh credentials for git remotes
+  "~/.npmrc",                       # npm token if aider drives node tooling
 ]
 
 [markers]
-enabled = false          # no first-party marker channel; causality via process tree + time
+enabled = false          # no first-party hook/lifecycle mechanism; causality via process tree + time
 
 [timeline]
 lens = "tree"             # process tree reads naturally for a coding session

@@ -1,0 +1,93 @@
+# RanA profile: gemini-cli
+# Gemini CLI (Google, github.com/google-gemini/gemini-cli): an open-source
+# (Apache-2.0) terminal AI agent. Installed as the `gemini` command, usually
+# run inside a git working tree and driven from a shell — architecturally a
+# repo-scoped coding CLI like aider/codex. Config + context + credentials live
+# under ~/.gemini (user-level) and ./.gemini (project-level).
+#
+# HONEST CAPTURE CAVEAT (P1/P10): Gemini CLI can execute shell/tool code inside
+# a SANDBOX (settings `sandbox` / `--sandbox` / GEMINI_SANDBOX):
+#   * No sandbox (default off) -> the agent's shell/tool execs run in the same
+#     session cgroup by inheritance and are FULLY captured.
+#   * Docker/Podman sandbox     -> the sandboxed processes live in a container
+#     cgroup owned by the container runtime, not the session; RanA sees the
+#     `docker`/`podman` invocation (the precursor) but not the in-container
+#     execs — same class as codex/hermes's delegated-spawn blind spot.
+#   * macOS Seatbelt (sandbox-exec) -> in-process restriction on the LOCAL host;
+#     execs remain in the session cgroup and are captured (RanA records what was
+#     DID at the kernel layer beneath the seatbelt profile — complementary).
+# This is documented in LIMITS.md; it is a property of where the code runs, not
+# a gap in RanA.
+
+[profile]
+name        = "gemini-cli"
+description = "Gemini CLI (Google) — repo-scoped terminal coding agent with optional sandbox."
+version     = 1
+
+[match]
+auto = true
+exe_basename = ["gemini"]
+# Installed as the `gemini` console command. The argv fallback covers
+# `npx @google/gemini-cli` / `node .../gemini.js` launches.
+argv_contains = ["gemini-cli", "@google/gemini-cli"]
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true
+
+[digest]
+# Gemini CLI's job is editing the repo it was started in; that tree holds the
+# durable artifacts. GEMINI.md context files live in the tree and are captured
+# by the same scope.
+scopes  = ["$SESSION_CWD/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**", "**/dist/**"]
+
+[sensitive_read]
+# Gemini CLI's credential surface: OAuth login persists tokens under ~/.gemini,
+# plus the usual API-key env-file and provider-cred paths a coding agent with
+# shell + web-fetch reach may touch. These reads are the exfiltration precursor
+# RanA exists to catch.
+extra = [
+  "~/.gemini/oauth_creds.json",     # persisted Google OAuth access/refresh tokens
+  "~/.gemini/google_accounts.json", # cached account identity
+  "~/.gemini/tokens.json",          # cached auth token
+  "~/.gemini/settings.json",        # may embed mcpServers auth / env
+  "~/.gemini/.env",                 # GEMINI_API_KEY / GOOGLE_API_KEY env file
+  "~/.config/gcloud/**",            # ADC / GOOGLE_APPLICATION_CREDENTIALS
+  "~/.config/gh/**",
+  "~/.netrc",
+  "~/.npmrc",
+]
+
+[markers]
+# The optional Gemini CLI hook (plugins/gemini-cli/rana-marker.sh, wired via a
+# SessionStart/SessionEnd command hook in settings.json) emits run-lifecycle
+# markers over the rana marker socket, upgrading the raw event river into
+# "session start -> these execs -> these egress connects -> this file changed."
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId (Gemini session_id), agentId, channel, status  -> yes
+#   prompt / transcript / model output / GEMINI.md text   -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"   # per-session random token issued at adopt/run time
+events        = ["run.start", "run.end"]
+# maps to Gemini CLI's settings.json lifecycle hooks
+# (https://geminicli.com/docs/hooks/reference/):
+#   hooks.SessionStart {session_id, source}          => run.start
+#   hooks.SessionEnd   {session_id, reason}          => run.end
+# (see plugins/gemini-cli/rana-marker.sh and plugins/gemini-cli/README.md)
+carry_fields  = ["runId", "agentId", "channel", "status", "phase", "ts"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
+
+[timeline]
+lens = "tree"             # process tree reads naturally for a coding session
+
+[retention]
+ttl_days = 30

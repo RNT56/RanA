@@ -30,7 +30,7 @@ var embeddedPacks embed.FS
 // the order Available() returns them.
 var shippedPackNames = []string{
 	"generic", "claude-code", "codex", "openclaw", "opencode", "hermes",
-	"aider", "cursor", "generic-ci",
+	"gemini-cli", "goose", "cline", "aider", "cursor", "generic-ci",
 }
 
 // Load loads and validates a shipped profile pack by name (one of

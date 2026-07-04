@@ -1,0 +1,123 @@
+# RanA profile: cline
+# Cline (github.com/cline/cline, cline.bot) — an open-source autonomous coding
+# agent shipped THREE ways: a VS Code extension (id saoudrizwan.claude-dev, the
+# original "Claude Dev"), a terminal CLI (`cline`, `npm i -g cline`), and an SDK
+# (@cline/sdk). It edits the working tree, runs terminal commands, installs
+# packages, and talks to MCP servers. Bring-your-own-key (Anthropic/OpenAI/
+# OpenRouter/Bedrock/Vertex/Azure). A background "hub" daemon runs long tasks
+# (`cline --zen`, `cline hub`) bound to 127.0.0.1:25463. Config + sessions +
+# hooks live under ~/.cline/.
+#
+# HONEST CAPTURE CAVEAT (P1/P10 — attribution depends on WHERE Cline runs):
+#   * CLI (`cline ...`) and hub daemon -> run as their own process tree in the
+#     session cgroup; every exec / file write / egress they and their children
+#     (shell commands, package installs, git, MCP servers) perform is captured
+#     and attributed to Cline directly. This is the clean, hero path.
+#   * VS Code EXTENSION (saoudrizwan.claude-dev) -> the agent runs INSIDE the VS
+#     Code extension-host process (a child of Code), NOT as a standalone
+#     `cline` binary. RanA still captures the kernel effects — terminal commands
+#     Cline runs, files it writes, connections it opens — because they are execs
+#     under the Code/extension-host subtree in the session cgroup. But they
+#     ATTRIBUTE to `code`/the extension host, not to an exe named "cline", so
+#     exe_basename matching does not fire for the extension path; recognition
+#     there is by adopt (~/.cline present) + the marker emitter's runId, not by
+#     process name. This is a property of VS Code's architecture, not a RanA gap;
+#     it is documented in LIMITS.md.
+#   * Remote/container work -> if Cline executes in a devcontainer, SSH remote,
+#     or WSL, code runs in a different cgroup/host; RanA records the precursor
+#     (the `docker`/`ssh` invocation) but not the in-container/remote execs —
+#     the same delegated-spawn blind spot as every profile.
+
+[profile]
+name        = "cline"
+description = "Cline — open-source autonomous coding agent (VS Code extension, `cline` CLI, SDK)."
+version     = 1
+
+[match]
+auto = true
+# The CLI installs a `cline` console binary; the hub daemon is spawned from it.
+# (The VS Code extension path runs inside the Code extension host and does NOT
+# present a `cline` exe — see the caveat above; it is recognized via adopt +
+# markers, not exe_basename.)
+exe_basename = ["cline"]
+argv_contains = ["cline"]
+
+[adopt]
+# `rana adopt cline` corroborates via ~/.cline/ existing on disk (shared by the
+# CLI, hub, and the extension's file-backed store) and can install the marker
+# hooks (see [markers] and plugins/cline/).
+config_dir       = "~/.cline"
+linux_supervisor  = "systemd"
+macos_supervisor  = "launchd"
+consent_default   = "yes"
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true             # Cline reaches MCP servers / the hub over local sockets
+
+[digest]
+# Cline's whole job is editing the repo it was started in; the working tree is
+# the high-value durable-artifact surface. Its own persisted rules/skills under
+# ~/.cline are enrichment the agent writes for itself, so digest those too.
+scopes = ["$SESSION_CWD/**", "~/.cline/data/settings/rules/**", "~/.cline/data/settings/skills/**"]
+exclude = [
+  "**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**",
+  "~/.cline/data/logs/**", "~/.cline/**/*.log", "~/.cline/data/sessions/**",
+]
+
+[sensitive_read]
+# Cline is bring-your-own-key and reaches many providers; its provider store and
+# the broad dev-credential surface a coding agent runs into are the exfiltration
+# precursors RanA exists to catch. (The npm-token path is the very incident class
+# — a compromised package reading ~/.npmrc — this tool was built to surface.)
+extra = [
+  "~/.cline/data/settings/providers.json",  # Cline's provider API keys live here
+  "~/.cline/**/*token*",
+  "~/.cline/**/auth*",
+  "~/.config/gh/**",                         # gh CLI tokens
+  "~/.netrc",
+  "~/.npmrc",                                # npm auth (the Cline/npm incident class)
+  "~/.cargo/credentials*",
+  "~/.pypirc",
+  "~/.aws/**", "~/.config/gcloud/**",
+]
+
+[markers]
+# The optional Cline marker hooks (plugins/cline/, dropped in ~/.cline/hooks/ or
+# ~/Documents/Cline/Rules/Hooks/) emit run-lifecycle markers over the rana marker
+# socket, upgrading the raw kernel-event river into "this task -> these execs ->
+# these egress connects -> this file changed", clustered by Cline's taskId.
+#
+# Cline's hook system (cline.bot, v3.36+) runs an executable named after each
+# lifecycle event and hands it a HookInput JSON on stdin. RanA maps:
+#   TaskStart                 => run.start
+#   TaskComplete / TaskCancel => run.end   (completed / cancelled)
+# runId is Cline's taskId. Content-bearing hooks (UserPromptSubmit, Pre/PostToolUse)
+# are deliberately NOT wired — they carry prompt/tool text we must never touch (P7).
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId, agentId, channel, status  -> yes
+#   message text / prompt / completion -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"   # per-session random token issued at adopt/run time
+events        = ["run.start", "run.end"]
+carry_fields  = ["runId", "agentId", "channel", "status", "phase", "ts"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
+
+[timeline]
+# Causality lens: cluster events by runId (Cline's taskId, from markers) into
+# "consequences of a task". Without the hooks, fall back to process-tree + time
+# clustering labeled `inferred`.
+lens          = "causality"
+cluster_by    = "runId"
+fallback_lens = "inferred"
+
+[retention]
+ttl_days = 30

@@ -91,7 +91,8 @@ func TestAvailable_ListsShippedPacks(t *testing.T) {
 	names := Available()
 	want := map[string]bool{
 		"generic": true, "claude-code": true, "codex": true, "openclaw": true,
-		"opencode": true, "hermes": true, "aider": true, "cursor": true, "generic-ci": true,
+		"opencode": true, "hermes": true, "gemini-cli": true, "goose": true,
+		"cline": true, "aider": true, "cursor": true, "generic-ci": true,
 	}
 	if len(names) != len(want) {
 		t.Fatalf("Available() = %#v, want %d entries", names, len(want))

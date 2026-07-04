@@ -1,0 +1,105 @@
+# RanA profile: goose
+# goose (Block; contributed to the Linux Foundation's Agentic AI Foundation in
+# Dec 2025; github.com/block/goose, aaif-goose/goose): an open-source, extensible
+# on-machine AI agent with a `goose` CLI and a Desktop app. Rust core. Runs on
+# your machine — installs, executes, edits, and tests code with any LLM, driven
+# from a shell inside your project tree. Config under ~/.config/goose/.
+#
+# Shape: goose is a repo/cwd-scoped coding agent (closest to claude-code/aider),
+# NOT a long-lived messaging gateway. Its capabilities come from MCP "extensions"
+# (developer shell, computercontroller, memory, plus 70+ third-party MCP servers).
+# The developer extension's shell/edit tools run LOCALLY as children of the goose
+# process, so a single cgroup slice captures goose + every exec + every egress by
+# inheritance — RanA's session tree is exactly goose's tool fan-out.
+#
+# HONEST CAPTURE CAVEAT (P1/P10): an MCP extension is itself a process goose
+# spawns/connects to. A LOCAL (stdio) MCP server is a child in the same cgroup ->
+# fully captured. A REMOTE MCP extension (SSE/streamable-HTTP to another host, or
+# an MCP server goose reaches inside a container) executes off this cgroup: RanA
+# records the outbound connect (the precursor), not the remote/in-container tool
+# effects. Same delegated-execution blind spot documented for hermes/openclaw;
+# it is a property of WHERE the code runs, not a gap in RanA. See LIMITS.md.
+
+[profile]
+name        = "goose"
+description = "goose (Block/AAIF) — on-machine extensible coding agent, cwd-scoped, MCP extensions."
+version     = 1
+
+[match]
+auto = true
+# Installed as the `goose` CLI (the Desktop app also drives the same core).
+exe_basename = ["goose"]
+# Fallback for `goose session`, `goose run`, and wrapper invocations.
+argv_contains = ["goose"]
+
+[adopt]
+# goose keeps global config + sessions + secrets under ~/.config/goose.
+config_dir       = "~/.config/goose"
+linux_supervisor  = "systemd"
+macos_supervisor  = "launchd"
+consent_default   = "yes"
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true             # stdio MCP extensions + local sockets matter
+
+[digest]
+# goose earns its keep on the working tree it was launched in (the developer
+# extension edits/creates files there). Durable artifacts also include goose's
+# own memory store and any recipes it writes.
+scopes  = ["$SESSION_CWD/**", "~/.config/goose/memory/**", "~/.config/goose/recipes/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**", "~/.config/goose/logs/**", "~/.config/goose/sessions/**"]
+
+[sensitive_read]
+# goose's own credential surface + the provider creds a broadly-integrated
+# coding agent may reach for. secrets.yaml holds API keys IN PLAINTEXT whenever
+# the OS keyring is disabled/absent (headless/CI/containers, GOOSE_DISABLE_KEYRING)
+# — a first-class exfiltration precursor RanA exists to catch.
+extra = [
+  "~/.config/goose/secrets.yaml",   # provider API keys when keyring is off (plaintext)
+  "~/.config/goose/config.yaml",    # provider/model/extension config
+  "~/.config/goose/**/*token*",
+  "~/.config/gh/**",                # gh CLI tokens a coding agent might reach for
+  "~/.netrc",                       # HTTPS git remotes
+  "~/.npmrc",                       # npm auth (the Cline incident class)
+  "~/.cargo/credentials*",
+  "~/.pypirc",
+  "~/.aws/**", "~/.config/gcloud/**",
+]
+
+[markers]
+# Optional first-party enrichment channel. The tiny goose hook
+# (plugins/goose/rana-marker.sh) emits run-lifecycle markers over the rana
+# marker socket, upgrading the raw event river into
+# "session started -> these execs -> these egress connects -> this file changed".
+#
+# goose has a real lifecycle-hook mechanism (command hooks; a plugin's
+# hooks/hooks.json wires a "command" hook that receives the event JSON on stdin).
+# We wire SessionStart/SessionEnd only — session granularity == one "run".
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId, agentId, channel, status, phase, ts  -> yes
+#   prompt / message / tool_input / content     -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event. If RANA_MARKER_SOCKET is unset the hook is
+# inert, and RanA falls back to process-tree + time clustering.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"   # per-session random token issued at record/adopt time
+events        = ["run.start", "run.end"]
+# maps to goose's hook lifecycle (https://goose-docs.ai/blog/2026/05/14/goose-hooks/):
+#   SessionStart  {session_id, working_dir}  => run.start {status:"accepted"}
+#   SessionEnd    {session_id}               => run.end   {status:"completed"}
+# (see plugins/goose/rana-marker.sh and plugins/goose/README.md)
+carry_fields  = ["runId", "agentId", "channel", "status", "phase", "ts"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
+
+[timeline]
+lens = "tree"                 # process tree reads naturally for a coding session
+
+[retention]
+ttl_days = 30

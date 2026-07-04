@@ -92,9 +92,9 @@ func cmdTail(args []string, stdout, stderr io.Writer) int {
 
 // cmdDoctor reports RanA's health: the common (portable) checks here, plus a
 // platform-specific section (kernel/BTF/cgroup tier on Linux; macOS/vz/guest
-// on macOS) provided by doctorPlatform. With --report, it instead (in
-// addition — see cmdDoctorReport) prints a plain-text, copy-pasteable trust
-// card suitable for pasting into an issue or handing to a colleague.
+// on macOS) provided by doctorPlatform. With --report, it instead delegates
+// to cmdDoctorReport, which prints a plain-text, copy-pasteable trust card
+// suitable for pasting into an issue or handing to a colleague.
 func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)

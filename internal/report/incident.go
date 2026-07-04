@@ -324,6 +324,13 @@ func findFirst(events []schema.Event, t schema.EventType) *schema.Event {
 	return nil
 }
 
+// redactedField reads data[key] as a redact.Redacted or plain string,
+// returning ("", false) if the key is absent or not string-shaped. Shared by
+// this file's per-type describeEvent/describeAlert cases and by
+// digest_diff.go's DigestDiff (fs.settle's "path" field is always a
+// redact.Redacted via schema.NewFsSettle, but this also accepts a plain
+// string defensively for synthetic test events built without going through
+// the redaction pipeline).
 func redactedField(data map[string]any, key string) (string, bool) {
 	v, ok := data[key]
 	if !ok {

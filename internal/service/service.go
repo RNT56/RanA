@@ -89,8 +89,9 @@ type Config struct {
 	MarkerToken  string
 	// RequireRanadUID, if non-nil, gates the ranad socket to this uid via
 	// SO_PEERCRED (see RanadServerConfig.RequirePeerUID). Production
-	// callers pass a pointer to rootUID; nil is used in tests connecting
-	// over net.Pipe (which has no peer credential to check).
+	// callers pass a pointer to uid 0 (root, since ranad runs privileged —
+	// see cmd/rana's runPlatform); nil is used in tests connecting over
+	// net.Pipe (which has no peer credential to check).
 	RequireRanadUID *uint32
 	// Notifier delivers best-effort desktop alert notifications. Defaults
 	// to alerts.NopNotifier.

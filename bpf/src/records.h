@@ -41,12 +41,16 @@
 #define RANA_KIND_MIGRATION    10
 
 /* fs.* sub-type, records.md §4 "Op" field. */
-#define RANA_FSOP_WRITE_OPEN 1
-#define RANA_FSOP_UNLINK     2
-#define RANA_FSOP_RENAME     3
-#define RANA_FSOP_MKDIR      4
-#define RANA_FSOP_CHMOD      5
-#define RANA_FSOP_TRUNCATE   6
+#define RANA_FSOP_WRITE_OPEN     1
+#define RANA_FSOP_UNLINK         2
+#define RANA_FSOP_RENAME         3
+#define RANA_FSOP_MKDIR          4
+#define RANA_FSOP_CHMOD          5
+#define RANA_FSOP_TRUNCATE       6
+/* Sensitive-watchlist open (D9): read-or-write open of a watchlisted
+ * path/inode. Mode carries the matched rule id. The collector maps this to
+ * fs.sensitive_read (never fs.write_open). */
+#define RANA_FSOP_SENSITIVE_READ 7
 
 /* path_source, records.md §4 "PathSource" field. */
 #define RANA_PATH_SOURCE_RESOLVED 0

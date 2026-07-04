@@ -121,13 +121,11 @@ func (e *Enricher) UnbindCgid(cgid uint64) {
 // together. Any cgids still bound to the session are unbound too, so a
 // finished session leaves no residue.
 //
-// Wiring note (LIMITS.md §8, CHANGELOG Plan v1.2): the ranad↔svc session-end
-// signal that would call this in production is a documented open item;
-// until it lands, this method exists and is unit-tested but is not yet
-// invoked by the daemon loop. It is deliberately safe to call for an unknown
-// session (a no-op) and MUST only be called once a session is truly over —
-// never for a live session, since dropping nextIdx mid-session would restart
-// Idx at 0 and duplicate identifiers.
+// Wired via Pump.DrainEndedSessions, called from ranad's outbound loop on
+// each inbound wire.SessionEnd frame (cmd/ranad/pump.go). It is deliberately
+// safe to call for an unknown session (a no-op) and MUST only be called once
+// a session is truly over — never for a live session, since dropping
+// nextIdx mid-session would restart Idx at 0 and duplicate identifiers.
 func (e *Enricher) EndSession(session string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -241,6 +239,8 @@ func fsOpEventType(op FsOp) (schema.EventType, error) {
 		return schema.EventTypeFsChmod, nil
 	case FsOpTruncate:
 		return schema.EventTypeFsTruncate, nil
+	case FsOpSensitiveRead:
+		return schema.EventTypeFsSensitiveRead, nil
 	default:
 		return "", errors.New("collector: unknown FsOp")
 	}
@@ -285,32 +285,23 @@ func (e *Enricher) EnrichFsOp(rec FsOpRecord, seg uint64) (schema.Event, error) 
 		return schema.NewFsChmod(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid, path, pathSource, rec.Mode), nil
 	case FsOpTruncate:
 		return schema.NewFsTruncate(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid, path, pathSource, rec.Mode), nil
+	case FsOpSensitiveRead:
+		// D9's highest-signal event: a watchlisted open. The eBPF program
+		// carries the matched rule id in Mode (no dedicated wire field). Both
+		// path and rule pass through the redaction pipeline (uniform P3 —
+		// a rule id is not a secret, but the writer only accepts Redacted).
+		rule := e.pipeline.Redact(fmt.Sprintf("rule-%d", rec.Mode))
+		return schema.NewFsSensitiveRead(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid, path, rule), nil
 	default:
 		// Unreachable: fsOpEventType already validated rec.Op above.
 		return schema.Event{}, errors.New("collector: unknown FsOp")
 	}
 }
 
-// EnrichSensitiveRead builds an fs.sensitive_read event. Unlike the other
-// Enrich* methods this one is called directly with already-decoded scalar
-// fields rather than a Record type, because sensitive-read matching
-// happens against RanA's watchlist inside the eBPF program itself (D9) and
-// is expected to arrive as a distinct, already-classified signal (rule id)
-// alongside the raw path — the exact wire shape is owned by internal/bpf
-// and intentionally left flexible here pending that integration; the
-// enrichment contract (redact path+rule, resolve session, assign idx) is
-// what this package is responsible for.
-func (e *Enricher) EnrichSensitiveRead(session string, seg uint64, pid uint32, tsMono, tsWall uint64, path, rule string) (schema.Event, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if session == "" {
-		return schema.Event{}, ErrUnknownCgid
-	}
-	idx := e.nextIdxFor(session)
-	rp := e.pipeline.RedactPath(path)
-	rr := e.pipeline.Redact(rule)
-	return schema.NewFsSensitiveRead(session, seg, idx, tsMono, tsWall, pid, rp, rr), nil
-}
+// (fs.sensitive_read is produced by EnrichFsOp's FsOpSensitiveRead case —
+// the eBPF sensitive-watchlist branch emits a kind=4 FsOpRecord with that op
+// and the matched rule id in Mode, so it flows through the same decode →
+// EnrichFsOp → event path as every other fs.* record.)
 
 // ---- net.* ----
 

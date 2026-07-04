@@ -98,11 +98,11 @@ func (*Ev) frameTag() string { return "ev" }
 
 // HeadReport mirrors chain.HeadReport's fields (CONTRACTS §internal/chain).
 // wire defines its own copy rather than importing internal/chain: the
-// package graph places wire's dependencies at {cborcanon, schema} only, and
-// HeadReport is a plain data shape with no chain-package behavior attached,
-// so duplicating the field set here keeps that dependency edge honest. If
-// internal/chain's HeadReport ever diverges from this shape, that is a
-// contract break to flag, not something wire should paper over.
+// package graph places wire's own (non-test) dependency at {cborcanon} only,
+// and HeadReport is a plain data shape with no chain-package behavior
+// attached, so duplicating the field set here keeps that dependency edge
+// honest. If internal/chain's HeadReport ever diverges from this shape, that
+// is a contract break to flag, not something wire should paper over.
 type HeadReport struct {
 	SessionID string   // session id (ULID-format string) the checkpoint belongs to
 	SegLast   uint64   // last segment index covered by the checkpoint

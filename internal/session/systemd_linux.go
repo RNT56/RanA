@@ -1,21 +1,10 @@
 //go:build linux
 
-// This file requires github.com/godbus/dbus/v5, which CONTRACTS
-// §internal/session whitelists as an importable dependency for
-// linux-tagged files but which is NOT currently present in go.mod's
-// require block (only golang.org/x/sys is available to non-cgo linux
-// files today). Per the build rules for this package ("no go.mod edits"),
-// this file is written to the intended final shape but will not compile
-// with `go build`/`go vet` until a future commit adds:
-//
-//	require github.com/godbus/dbus/v5 vX.Y.Z
-//
-// to go.mod (plus the corresponding go.sum entries). See the final report
-// for this package for the full flag. Until that lands, GOOS=linux builds
-// of this package will fail on this file specifically; every other file
-// in the package (including cgroup_linux.go, the raw-cgroupfs fallback
-// driver that CONTRACTS names as the systemd alternative) compiles and
-// vets clean for linux today.
+// This file implements the systemd/D-Bus Driver using
+// github.com/godbus/dbus/v5, which CONTRACTS §internal/session whitelists
+// as an importable dependency for linux-tagged files and which go.mod
+// declares as a require (see go.mod/go.sum). GOOS=linux builds of this
+// package compile this file along with the rest of the package.
 package session
 
 import (

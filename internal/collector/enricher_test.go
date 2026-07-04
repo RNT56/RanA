@@ -236,21 +236,35 @@ func TestEnrichFsOpUnknownOpErrors(t *testing.T) {
 	}
 }
 
-// ---- EnrichSensitiveRead ----
+// ---- fs.sensitive_read (via an FsOpRecord with FsOpSensitiveRead) ----
 
-func TestEnrichSensitiveRead(t *testing.T) {
+// TestEnrichFsOpSensitiveReadProducesSensitiveReadEvent proves the D9
+// highest-signal path is wired: a kind=4 FsOpRecord with op=FsOpSensitiveRead
+// (as the eBPF sensitive-watchlist branch emits) becomes an
+// fs.sensitive_read event — NOT an fs.write_open — carrying the matched rule
+// (from Mode) as a redacted field. This is what the Tier-2 trifecta alert
+// keys on.
+func TestEnrichFsOpSensitiveReadProducesSensitiveReadEvent(t *testing.T) {
 	clk := newFakeClock()
 	e := newTestEnricher(t, clk)
 	e.BindCgid(1, "sess-1")
-	ev, err := e.EnrichSensitiveRead("sess-1", 0, 1, 5, 6, "/home/user/.aws/credentials", "aws-creds")
+	rec := FsOpRecord{
+		Op: FsOpSensitiveRead, PathSource: PathSourceKindResolved,
+		Pid: 42, Cgid: 1, TsMono: 5, TsWall: 6,
+		Path: "/home/user/.ssh/id_ed25519", Mode: 3, // Mode = matched rule id
+	}
+	ev, err := e.EnrichFsOp(rec, 0)
 	if err != nil {
-		t.Fatalf("EnrichSensitiveRead: %v", err)
+		t.Fatalf("EnrichFsOp: %v", err)
 	}
 	if ev.Type != schema.EventTypeFsSensitiveRead {
-		t.Errorf("Type = %v", ev.Type)
+		t.Fatalf("Type = %v, want fs.sensitive_read (a watchlisted read must NOT be fs.write_open)", ev.Type)
 	}
 	if _, ok := ev.Data["rule"].(redact.Redacted); !ok {
-		t.Errorf("Data[rule] type = %T", ev.Data["rule"])
+		t.Errorf("Data[rule] type = %T, want redact.Redacted", ev.Data["rule"])
+	}
+	if _, ok := ev.Data["path"].(redact.Redacted); !ok {
+		t.Errorf("Data[path] type = %T, want redact.Redacted", ev.Data["path"])
 	}
 }
 

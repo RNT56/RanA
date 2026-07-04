@@ -13,7 +13,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/RNT56/RanA/internal/redact"
 	"github.com/RNT56/RanA/internal/schema"
 	"lukechampine.com/blake3"
 )
@@ -72,7 +71,7 @@ func DigestDiff(tr PathTranslator, ev schema.Event) (DigestDiffResult, error) {
 		return DigestDiffResult{}, fmt.Errorf("report: DigestDiff: PathTranslator must not be nil")
 	}
 
-	recordedPath, ok := stringField(ev.Data, "path")
+	recordedPath, ok := redactedField(ev.Data, "path")
 	if !ok || recordedPath == "" {
 		return DigestDiffResult{}, fmt.Errorf("report: fs.settle event missing path field")
 	}
@@ -139,24 +138,4 @@ func DigestDiff(tr PathTranslator, ev schema.Event) (DigestDiffResult, error) {
 		res.Note = "on-disk content does NOT match the recorded new_digest: the file has changed since, or the recorded digest is unavailable"
 	}
 	return res, nil
-}
-
-// stringField reads data[key] as a redact.Redacted or plain string,
-// returning ("", false) if the key is absent or not string-shaped.
-// fs.settle's "path" field is always a redact.Redacted (schema.NewFsSettle),
-// but this also accepts a plain string defensively for synthetic test
-// events built without going through the pipeline.
-func stringField(data map[string]any, key string) (string, bool) {
-	v, ok := data[key]
-	if !ok {
-		return "", false
-	}
-	switch s := v.(type) {
-	case redact.Redacted:
-		return string(s), true
-	case string:
-		return s, true
-	default:
-		return "", false
-	}
 }

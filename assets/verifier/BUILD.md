@@ -17,12 +17,16 @@ cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" assets/verifier/wasm_exec.js
 # (older Go toolchains: "$(go env GOROOT)/misc/wasm/wasm_exec.js")
 ```
 
-The release pipeline runs both steps and bundles the resulting five files
-(`index.html`, `main.js`, `style.css`, `rana-verify.wasm`, `wasm_exec.js`)
-together — the page is fully self-contained and works with `file://` or any
-static file server, with **no build step required by the end user** and
-**no network access at runtime** (D24): every fetch it performs is
-same-origin, for these five files only.
+Once built, the five files together (`index.html`, `main.js`, `style.css`,
+`rana-verify.wasm`, `wasm_exec.js`) are a fully self-contained page that
+works with `file://` or any static file server, with **no build step
+required by the end user** and **no network access at runtime** (D24):
+every fetch it performs is same-origin, for these five files only.
+
+**Not yet wired into `.github/workflows/release.yml`**: the two build
+steps above are run locally today; the release pipeline does not yet
+produce or attach these five files to a release. Until that lands, treat
+this viewer as a source-build/local-serve artifact, not a released one.
 
 To try it locally:
 

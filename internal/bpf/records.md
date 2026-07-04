@@ -137,10 +137,13 @@ element via `Pipeline.RedactArgv` before it can reach `schema.NewProcExec`
 ## 4. `FsOpRecord` (kind=4) — 4148 bytes
 
 One shared layout for every fs.* kernel event; the semantic sub-type is
-carried in `Op uint8` (`FsOpWriteOpen`, `FsOpUnlink`, `FsOpRename`,
-`FsOpMkdir`, `FsOpChmod`, `FsOpTruncate`). `Path2` is only meaningful for
-`FsOpRename` (the destination path) and is zero-length (`Path2Len == 0`)
-otherwise.
+carried in `Op uint8` (`FsOpWriteOpen`=1, `FsOpUnlink`=2, `FsOpRename`=3,
+`FsOpMkdir`=4, `FsOpChmod`=5, `FsOpTruncate`=6, `FsOpSensitiveRead`=7).
+`Path2` is only meaningful for `FsOpRename` (the destination path) and is
+zero-length (`Path2Len == 0`) otherwise. For `FsOpSensitiveRead` (D9, the
+sensitive-watchlist branch of `security_file_open`), `Mode` carries the
+matched rule id and the collector maps the record to `fs.sensitive_read`
+(never `fs.write_open`).
 
 | Offset | Field | Type | Notes |
 |---|---|---|---|

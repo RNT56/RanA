@@ -16,10 +16,12 @@ import (
 // dsAdapter narrows an *service.LedgerDataSource (which satisfies the
 // broader internal/ui.DataSource interface) down to the small
 // internal/report.DataSource shape, converting ui.SessionSummary values to
-// report.SessionSummary values. This is exactly the adapter a future CLI
-// wiring (cmd/rana) would write; it lives in a test here to prove
-// internal/report's DataSource interface is genuinely satisfiable by the
-// real ledger-backed implementation, not just by the in-package fake.
+// report.SessionSummary values. This mirrors cmd/rana/report_adapter.go's
+// reportDataSource — the real CLI wiring's copy of the same adapter, which
+// this package cannot import (it lives in package main) — so it is
+// duplicated here to prove internal/report's DataSource interface is
+// genuinely satisfiable by the real ledger-backed implementation, not just
+// by the in-package fake.
 type dsAdapter struct {
 	inner *service.LedgerDataSource
 }

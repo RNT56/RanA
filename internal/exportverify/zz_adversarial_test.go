@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/RNT56/RanA/internal/cborcanon"
 	"github.com/RNT56/RanA/internal/exportverify"
 )
 
@@ -86,6 +87,66 @@ func TestAdversarialMalformedInputsDoNotPanic(t *testing.T) {
 			res := exportverify.VerifyExportFiles(c)
 			t.Logf("res = %+v", res)
 		})
+	}
+}
+
+// adversarialSegHeader mirrors verify.go's unexported segHeaderRecord
+// field-for-field, so this test can encode a seg_header with an
+// attacker-controlled event_count without VerifyExportFiles's own decode
+// path caring which struct produced the identical CBOR shape.
+type adversarialSegHeader struct {
+	SessionID    string            `cbor:"session_id"`
+	SegIndex     uint64            `cbor:"seg_index"`
+	FirstRowID   int64             `cbor:"first_rowid"`
+	LastRowID    int64             `cbor:"last_rowid"`
+	EventCount   uint64            `cbor:"event_count"`
+	MerkleRoot   []byte            `cbor:"merkle_root"`
+	PrevSegHash  []byte            `cbor:"prev_seg_hash"`
+	GapSummary   map[string]uint64 `cbor:"gap_summary"`
+	SealedAtWall uint64            `cbor:"sealed_at_wall"`
+}
+
+// TestHugeEventCountInSegHeaderDoesNotPanic proves that a seg_header
+// record (inside segments.cbor) claiming an event_count at/above 2^63 is
+// rejected with a clean BROKEN result rather than panicking: converting
+// such a value to int wraps negative, which — if compared to the
+// remaining-leaf count only AFTER conversion — silently defeats an
+// "end > len(all)" bounds check and panics on the subsequent slice
+// expression in verifySegments. This is the same overflow-before-compare
+// trap that readUvarintPrefixedRecords/splitCheckpointRecord already guard
+// against for their raw uvarint length prefixes, but event_count arrives
+// via a decoded CBOR struct field instead of a raw uvarint, so it needs its
+// own coverage.
+func TestHugeEventCountInSegHeaderDoesNotPanic(t *testing.T) {
+	sh := adversarialSegHeader{
+		SessionID:   "01ARZ3NDEKTSV4RRFFQ69G5FC0",
+		EventCount:  1<<63 + 5, // wraps negative when cast to int
+		MerkleRoot:  make([]byte, 32),
+		PrevSegHash: make([]byte, 32),
+		GapSummary:  map[string]uint64{},
+	}
+	body, err := cborcanon.Encode(sh)
+	if err != nil {
+		t.Fatalf("encoding adversarial seg_header: %v", err)
+	}
+	lenBuf := make([]byte, binary.MaxVarintLen64)
+	n := binary.PutUvarint(lenBuf, uint64(len(body)))
+	rec := append(lenBuf[:n], body...)
+
+	files := map[string][]byte{
+		"manifest.json": validManifest(),
+		"events.cbor":   {},
+		"segments.cbor": rec,
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("panicked: %v", r)
+		}
+	}()
+	res := exportverify.VerifyExportFiles(files)
+	if res.Code != exportverify.CodeBroken {
+		t.Fatalf("Code = %d, want CodeBroken for an event_count overrun; reason=%q", res.Code, res.Reason)
 	}
 }
 

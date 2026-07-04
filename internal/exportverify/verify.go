@@ -496,10 +496,18 @@ func verifySegments(buf []byte, leavesBySession map[string][][32]byte) ([]segHea
 
 		all := leavesBySession[sh.SessionID]
 		start := cursorBySession[sh.SessionID]
-		end := start + int(sh.EventCount)
-		if end > len(all) {
+		// sh.EventCount is a uint64 straight off attacker-controlled CBOR
+		// (an untrusted .ranaproof's segments.cbor): compare it against the
+		// remaining leaf count BEFORE converting to int, exactly like
+		// readUvarintPrefixedRecords/splitCheckpointRecord do for their
+		// length prefixes above. A value at or above 2^63 would otherwise
+		// wrap to a negative int on conversion, silently defeat an
+		// "end > len(all)" check performed post-conversion, and panic on
+		// the slice expression below instead of returning a clean error.
+		if sh.EventCount > uint64(len(all)-start) {
 			return nil, nil, broken("merkle", "segments.cbor record %d (session %s seg %d): claims %d events but only %d remain in events.cbor for this session", i, sh.SessionID, sh.SegIndex, sh.EventCount, len(all)-start)
 		}
+		end := start + int(sh.EventCount)
 		leaves := all[start:end]
 		cursorBySession[sh.SessionID] = end
 

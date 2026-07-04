@@ -25,8 +25,7 @@ import (
 // and cmd/rana-verify-standalone do. If internal/ledger's on-disk schema
 // ever changes, this reader (and the mirrored decode struct in
 // ranad_server.go) must change with it — that coupling is the direct
-// consequence of CONTRACTS not defining a read API for internal/ledger; see
-// the final report's "conflict" note.
+// consequence of CONTRACTS not defining a read API for internal/ledger.
 type LedgerDataSource struct {
 	db *sql.DB
 

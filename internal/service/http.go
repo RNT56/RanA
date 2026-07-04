@@ -33,7 +33,7 @@ type TimelineHostConfig struct {
 // TimelineHost wraps internal/ui.Handler with the config svc supplies.
 // Binding a listener to 127.0.0.1:<random port> is the caller's
 // responsibility (internal/ui deliberately never calls net.Listen, and
-// neither does this type) — see Service.Start.
+// neither does this type) — see Service.TimelineHandler.
 type TimelineHost struct {
 	handler http.Handler
 }

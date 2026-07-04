@@ -213,10 +213,13 @@ func loadOrGenerateKey(dataDir string) (chain.KeyInfo, error) {
 	return chain.KeyInfo{}, errNoKey
 }
 
-// adoptPlatform (Linux) writes a systemd drop-in placing the target unit
-// under rana.slice, prints it, and (with consent) would reload+restart the
-// unit. It never edits the original unit file — adoption is a single,
-// documented, reversible drop-in (session.DropIn).
+// adoptPlatform (Linux) computes the systemd drop-in that would place the
+// target unit under rana.slice (session.DropIn) and always prints it for
+// review — it never edits the original unit file, and this build never
+// itself writes the drop-in or reloads/restarts the unit even with --yes and
+// root: that step is left to the packaged installer (see the printed plan
+// below). --yes only gates past the "re-run to see what root would do" nudge
+// far enough to surface the root-required error when not running as root.
 func adoptPlatform(p adoptParams) int {
 	unit := p.Target + ".service"
 	path, content := session.DropIn(unit, session.ScopeName(p.Target))
@@ -229,7 +232,8 @@ func adoptPlatform(p adoptParams) int {
 	fmt.Fprintln(p.Stdout, "`systemctl daemon-reload`.")
 
 	if !p.Assume {
-		fmt.Fprintln(p.Stdout, "\nRe-run with --yes to write the drop-in and restart the unit.")
+		fmt.Fprintln(p.Stdout, "\nRe-run with --yes to confirm (this build still only prints the plan;")
+		fmt.Fprintln(p.Stdout, "writing the drop-in and restarting the unit is left to the packaged installer).")
 		return exitOK
 	}
 	// Writing under /etc/systemd/system and restarting a unit requires root;

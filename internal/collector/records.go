@@ -109,6 +109,13 @@ const (
 	FsOpMkdir     FsOp = 4
 	FsOpChmod     FsOp = 5
 	FsOpTruncate  FsOp = 6
+	// FsOpSensitiveRead marks a kind=4 FsOpRecord emitted by the sensitive-
+	// watchlist branch of security_file_open (D9): a read-or-write open of a
+	// watchlisted path/inode. It carries the matched rule id in Mode and maps
+	// to schema.EventTypeFsSensitiveRead (never fs.write_open — a read of
+	// ~/.ssh is a read, not a write). It is the highest-signal capture class
+	// and the trigger for the Tier-2 trifecta alert.
+	FsOpSensitiveRead FsOp = 7
 )
 
 func checkLen(buf []byte, size int) error {
@@ -324,7 +331,7 @@ func DecodeFsOpRecord(buf []byte) (FsOpRecord, error) {
 
 	op := FsOp(buf[2])
 	switch op {
-	case FsOpWriteOpen, FsOpUnlink, FsOpRename, FsOpMkdir, FsOpChmod, FsOpTruncate:
+	case FsOpWriteOpen, FsOpUnlink, FsOpRename, FsOpMkdir, FsOpChmod, FsOpTruncate, FsOpSensitiveRead:
 	default:
 		return FsOpRecord{}, ErrLenOutOfRange
 	}

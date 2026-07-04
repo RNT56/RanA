@@ -2,10 +2,10 @@
 /*
  * rana_fs.c — file-op hooks (D7 hook set v1).
  *
- *   - fentry security_file_open        -> fs.write_open (kind=4, op=1)
- *     and fs.sensitive_read (matched via rana_sensitive_prefixes /
- *     rana_sensitive_inodes, D9) for read-intent opens of watchlisted
- *     paths
+ *   - fentry security_file_open        -> fs.write_open (kind=4, op=1) for
+ *     write-intent opens, and fs.sensitive_read (kind=4, op=7) for opens
+ *     (read or write) of a watchlisted path/inode (rana_sensitive_prefixes /
+ *     rana_sensitive_inodes, D9)
  *   - fentry security_path_unlink      -> fs.unlink (op=2)
  *   - fentry security_path_rename      -> fs.rename (op=3)
  *   - fentry security_path_mkdir       -> fs.mkdir  (op=4)
@@ -64,20 +64,14 @@ static __always_inline void rana_emit_fsop(__u8 op, __u32 pid, __u64 cgid,
 	bpf_ringbuf_submit(rec, 0);
 }
 
-/* rana_check_sensitive: matches the resolved path against
- * rana_sensitive_prefixes (D9) and the pinned (dev,inode) identity map,
- * emitting fs.sensitive_read (no dedicated FsOpRecord Op — sensitive
- * reads are a distinct record path per records.md's registry note that
- * fs.sensitive_read carries {path, rule}; represented here by reusing
- * FsOpRecord with Mode carrying the matched rule id, Flags=0, and
- * Op=RANA_FSOP_WRITE_OPEN is NOT used — instead we piggyback on the same
- * kind=4 record but callers distinguish sensitive-read at the collector
- * level via the (dev,inode)/prefix match already having happened
- * in-kernel; see records.md's note that this document is authoritative
- * for wire shape, not for every derived schema.EventType — sensitive
- * reads and write-opens share FsOpRecord's wire shape by design, kept
- * economical rather than adding an eleventh record kind for one extra
- * field). Returns the matched rule id, or 0 if no match. */
+/* rana_match_sensitive_prefix / rana_match_sensitive_inode: match the
+ * resolved path against rana_sensitive_prefixes (D9) and the pinned
+ * (dev,inode) identity map. A match produces an fs.sensitive_read event via
+ * an FsOpRecord (kind=4) with op=RANA_FSOP_SENSITIVE_READ and Mode carrying
+ * the matched rule id — a dedicated op, so the collector never confuses a
+ * watchlisted read with an fs.write_open. FsOpRecord's wire shape is reused
+ * (no eleventh record kind) since sensitive_read needs only {path, rule}.
+ * Returns the matched rule id, or 0 if no match. */
 static __always_inline __u32 rana_match_sensitive_prefix(const __u8 *path, int path_len)
 {
 	if (path_len <= 0)
@@ -167,16 +161,13 @@ int BPF_PROG(rana_file_open, struct file *file)
 		if (rec) {
 			rec->version = RANA_RECORD_VERSION;
 			rec->kind = RANA_KIND_FSOP;
-			/* Sensitive-read reuses the write_open Op slot value
-			 * space is exhausted by the six documented FsOp
-			 * constants; the collector's Enricher determines
-			 * fs.sensitive_read vs fs.write_open by *which*
-			 * program emitted it plus whether it matched a
-			 * watchlist rule — Mode carries the rule id here so
-			 * the collector can build
-			 * schema.NewFsSensitiveRead{path, rule} without a
-			 * new wire field. */
-			rec->op = RANA_FSOP_WRITE_OPEN;
+			/* Sensitive-read carries its own dedicated op
+			 * (RANA_FSOP_SENSITIVE_READ) so the collector maps it to
+			 * fs.sensitive_read, never fs.write_open — a read-only open
+			 * of ~/.ssh is a read, not a write. Mode carries the matched
+			 * rule id, which the collector renders into the event's
+			 * `rule` field (schema.NewFsSensitiveRead{path, rule}). */
+			rec->op = RANA_FSOP_SENSITIVE_READ;
 			rec->path_source = RANA_PATH_SOURCE_RESOLVED;
 			rec->pid = pid;
 			rec->cgid = cgid;

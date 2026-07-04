@@ -16,9 +16,21 @@ type FindingKind string
 
 // FindingKind constants — one per docs/TRUST.md §6 check, plus the
 // completeness/gap-honesty kinds `test/chain-mutations` exercises.
+//
+// Two kinds intentionally do NOT exist:
+//   - A distinct "leaf mismatch": individual leaf hashes are never persisted
+//     or compared on their own — they only ever feed the segment's Merkle
+//     root, so any single-event tamper surfaces as FindingMerkleMismatch
+//     (test/chain-mutations "edit one event byte").
+//   - A distinct "whole session deleted": deleting a session wholesale
+//     (events, segments, and checkpoints all removed) is caught by
+//     FindingCkptChainBroken via the ledger-wide checkpoint chain
+//     (verifyLedgerWideCheckpointChain) — the deleted session's checkpoints
+//     vanish from the sequence, breaking the hash link between its
+//     neighbors (docs/TRUST.md §5, test/chain-mutations "delete a whole
+//     session").
 const (
 	FindingNonCanonical      FindingKind = "non_canonical_encoding"
-	FindingLeafMismatch      FindingKind = "leaf_mismatch"
 	FindingMerkleMismatch    FindingKind = "merkle_mismatch"
 	FindingChainLinkBroken   FindingKind = "chain_link_broken"
 	FindingSignatureInvalid  FindingKind = "signature_invalid"
@@ -29,7 +41,6 @@ const (
 	FindingMirrorMismatch    FindingKind = "mirror_mismatch"
 	FindingMirrorUncheckable FindingKind = "mirror_uncheckable"
 	FindingArchiveMissing    FindingKind = "archive_missing"
-	FindingSessionMissing    FindingKind = "session_deleted"
 	FindingPubkeyUnresolved  FindingKind = "pubkey_unresolved"
 )
 

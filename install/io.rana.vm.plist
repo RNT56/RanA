@@ -37,14 +37,19 @@
     <key>Label</key>
     <string>io.rana.vm</string>
 
-    <!-- The host supervisor: `rana vm supervise` boots/keeps the guest and
-         streams events to the host ledger. Adjust the subcommand to whatever
-         internal/vm + cmd/rana settle on; `vm` is the frozen mac verb (D20). -->
+    <!-- The host supervisor: boots the guest and streams events to the host
+         ledger. `vm` is the frozen mac verb (D20); its current subcommands
+         are `status | start | stop | reset` (docs/MACOS.md §3, cmd/rana).
+         TEMPLATE NOTE: `start` is used below as the closest existing verb,
+         but as of this writing it does not yet block in the foreground the
+         way a launchd KeepAlive supervisor needs — confirm against
+         `rana vm --help` before relying on this unit's restart-on-crash
+         behavior. -->
     <key>ProgramArguments</key>
     <array>
         <string>{{RANA_BINARY}}</string>
         <string>vm</string>
-        <string>supervise</string>
+        <string>start</string>
     </array>
 
     <!-- Keep the guest supervisor alive; restart on crash. -->

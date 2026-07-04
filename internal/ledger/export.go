@@ -290,7 +290,11 @@ func decodeCheckpointExportRecord(rec []byte) (body, sig []byte, err error) {
 		return nil, nil, errors.New("ledger: malformed checkpoint export record (body length)")
 	}
 	off := sz
-	if off+int(bodyLen) > len(rec) {
+	// Compare the wire-supplied length against the small, bounded remaining
+	// space in uint64 BEFORE converting to int — a near-uint64-max length
+	// would otherwise wrap to a negative int and defeat the bounds check
+	// (same overflow-before-compare pattern hardened in internal/exportverify).
+	if bodyLen > uint64(len(rec)-off) {
 		return nil, nil, errors.New("ledger: malformed checkpoint export record (body overrun)")
 	}
 	body = rec[off : off+int(bodyLen)]
@@ -301,7 +305,7 @@ func decodeCheckpointExportRecord(rec []byte) (body, sig []byte, err error) {
 		return nil, nil, errors.New("ledger: malformed checkpoint export record (sig length)")
 	}
 	off += sz2
-	if off+int(sigLen) > len(rec) {
+	if sigLen > uint64(len(rec)-off) {
 		return nil, nil, errors.New("ledger: malformed checkpoint export record (sig overrun)")
 	}
 	sig = rec[off : off+int(sigLen)]

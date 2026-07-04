@@ -9,15 +9,14 @@ import "sync"
 // TWO independent processes assign Idx values into the same session's
 // stream: ranad's internal/collector.Enricher assigns Idx to kernel-origin
 // events, and svc must assign Idx to every event it originates itself —
-// there is no cross-process shared counter (see this package's final
-// report for the contract gap this raises: internal/ledger neither
-// enforces nor reads Idx for chain-integrity purposes — see
-// docs/TRUST.md §6 and internal/ledger/verify.go, which key
+// there is no cross-process shared counter (this is a contract gap:
+// internal/ledger neither enforces nor reads Idx for chain-integrity
+// purposes — see docs/TRUST.md §6 and internal/ledger/verify.go, which key
 // segment/session identity off rowid and [first_rowid,last_rowid], never
 // off Idx — so a same-session Idx collision between the two processes is a
 // display/ordering quality issue for the UI, never a chain-integrity or
 // security issue). svc's allocator is deliberately kept in its own
-// namespace (see NewIdxAllocator's doc) to minimize (not guarantee-zero)
+// namespace, starting at svcIdxBase, to minimize (not guarantee-zero)
 // collision surface with ranad's counter without invalidating either
 // side's "monotonic within its own writes" property.
 type idxAllocator struct {
@@ -39,7 +38,7 @@ func newIdxAllocator() *idxAllocator {
 	return &idxAllocator{next: make(map[string]uint64)}
 }
 
-// next returns the next Idx for session, allocating from svcIdxBase on
+// allocate returns the next Idx for session, allocating from svcIdxBase on
 // first use.
 func (a *idxAllocator) allocate(session string) uint64 {
 	a.mu.Lock()

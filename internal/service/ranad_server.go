@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 
 	"github.com/RNT56/RanA/internal/cborcanon"
@@ -319,20 +318,4 @@ func decodeEventFrame(b []byte, out *schema.Event) error {
 		Data:    env.Data,
 	}
 	return nil
-}
-
-// rootUID is the uid RanadServerConfig.RequirePeerUID is set to in
-// production (docs/ARCHITECTURE.md §2: ranad runs as root and dials into
-// svc's listening socket). Checking the peer's SO_PEERCRED/LOCAL_PEERCRED
-// uid against 0 rejects any other local user's process from connecting to
-// svc's ranad-facing socket and injecting events, even if it discovers the
-// socket path.
-const rootUID uint32 = 0
-
-// currentUID returns the effective uid of the running process, exposed for
-// callers (Service) that need to reason about their own uid — for example
-// when deciding what to log if RequirePeerUID is unexpectedly not 0 on a
-// platform where ranad does not run as root.
-func currentUID() uint32 {
-	return uint32(os.Getuid())
 }

@@ -1,0 +1,73 @@
+# RanA profile: opencode
+# OpenCode (opencode.ai) — the SST open-source coding agent / TUI. Typically a
+# repo-scoped coding agent launched in a working tree; a session per request,
+# fanning out to tool processes (shell, LSP, MCP servers).
+
+[profile]
+name        = "opencode"
+description = "OpenCode CLI/TUI — repo-scoped coding agent."
+version     = 1
+
+[match]
+auto = true
+# Heuristic identification when adopting/attaching without an explicit profile.
+exe_basename = ["opencode"]
+argv_contains = ["opencode"]
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true             # OpenCode reaches LSP/MCP over unix sockets
+
+[digest]
+# Coding agents earn their keep on the working tree, so before/after content
+# digests here are high-value. Default to the cwd the session started in.
+scopes = ["$SESSION_CWD/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**"]
+
+[sensitive_read]
+extra = [
+  "~/.config/opencode/**",    # OpenCode config + provider auth store
+  "~/.local/share/opencode/**",
+  "~/.config/gh/**",          # gh CLI tokens a coding agent might reach for
+  "~/.npmrc",                 # npm auth (the Cline incident class)
+  "~/.cargo/credentials*",
+  "~/.pypirc",
+]
+
+[markers]
+# The optional OpenCode plugin (plugins/opencode/rana-plugin.ts) emits
+# run-lifecycle markers over the rana marker socket. This upgrades the raw
+# event river into "inbound request -> these execs -> these egress connects
+# -> this file changed."
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId, agentId, channel, status  -> yes
+#   message text / prompt / completion -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"   # per-session random token issued at adopt/run time
+events        = ["run.start", "run.end"]
+# maps to OpenCode's plugin `event` hook session lifecycle:
+#   session.created {sessionID}  => run.start (status:"accepted")
+#   session.idle    {sessionID}  => run.end   (status:"completed")
+#   session.error   {sessionID}  => run.end   (status:"error")
+# (see plugins/opencode/rana-plugin.ts)
+carry_fields  = ["runId", "agentId", "channel", "status", "phase", "ts"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
+
+[timeline]
+# Causality lens: cluster events by runId (from markers) into "consequences of
+# a request". Without the plugin, fall back to process-tree + time clustering
+# labeled `inferred`.
+lens          = "causality"
+cluster_by    = "runId"
+fallback_lens = "inferred"
+
+[retention]
+ttl_days = 30

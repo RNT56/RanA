@@ -25,3 +25,9 @@ internal/ui/node_modules/
 /rana
 /ranad
 /rana-verify-standalone
+
+# built binaries at repo root
+/rana
+/ranad
+/rana-mcp
+/rana-verify-standalone

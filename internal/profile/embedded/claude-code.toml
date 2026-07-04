@@ -39,7 +39,26 @@ extra = [
 ]
 
 [markers]
-enabled = false               # no first-party marker channel; causality via process tree + time
+# Optional first-party enrichment channel. The ~150-LOC Claude Code hook
+# (plugins/claude-code/rana-marker.js) emits run-lifecycle markers over the
+# rana marker socket, upgrading the raw event river into
+# "session started -> these execs -> these egress connects -> this file changed".
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId, agentId, channel, status, phase, ts  -> yes
+#   message text / prompt / completion / summary -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event. If RANA_MARKER_SOCKET is unset the hook is
+# inert, and RanA falls back to process-tree + time clustering.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"   # per-session random token issued at record/adopt time
+events        = ["run.start", "run.end"]
+# maps to Claude Code's hook lifecycle (https://code.claude.com/docs/en/hooks):
+#   SessionStart          {session_id, source}   => run.start {status:"accepted"}
+#   SessionEnd (or Stop)  {session_id, reason}   => run.end   {status:"completed"|"error"}
+# (see plugins/claude-code/rana-marker.js and plugins/claude-code/README.md)
+carry_fields  = ["runId", "agentId", "channel", "status", "phase", "ts"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
 
 [timeline]
 lens = "tree"                 # process tree reads naturally for a coding session

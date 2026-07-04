@@ -32,7 +32,24 @@ extra = [
 ]
 
 [markers]
-enabled = false
+# The optional Codex hook (plugins/codex/rana-marker.js) emits run-lifecycle
+# markers over the rana marker socket, upgrading the raw event river into
+# "session start -> these execs -> these egress connects -> this file changed."
+#
+# CRITICAL (P7): markers carry IDENTIFIERS AND LIFECYCLE ONLY.
+#   runId (Codex session_id), agentId, channel, status  -> yes
+#   prompt / last_assistant_message / transcript / model -> NEVER
+# Markers are enrichment (P1): origin=enrichment. A forged marker can mislabel,
+# never fabricate a kernel event.
+enabled       = true
+socket        = "$RANA_MARKER_SOCKET"   # per-session random token issued at adopt/run time
+events        = ["run.start", "run.end"]
+# maps to Codex's config.toml lifecycle hooks (https://developers.openai.com/codex/hooks):
+#   [[hooks.SessionStart]] {session_id, status:"accepted"}   => run.start
+#   [[hooks.Stop]]         {session_id, status:"completed"}  => run.end
+# (see plugins/codex/rana-marker.js and plugins/codex/README.md)
+carry_fields  = ["runId", "agentId", "channel", "status", "phase", "ts"]
+forbid_fields = ["text", "prompt", "completion", "message", "content", "summary"]
 
 [timeline]
 lens = "tree"

@@ -29,7 +29,7 @@ var embeddedPacks embed.FS
 // shippedPackNames lists the shipped Tier-1 and Tier-2 packs, in
 // the order Available() returns them.
 var shippedPackNames = []string{
-	"generic", "claude-code", "codex", "openclaw",
+	"generic", "claude-code", "codex", "openclaw", "opencode",
 	"aider", "cursor", "generic-ci",
 }
 

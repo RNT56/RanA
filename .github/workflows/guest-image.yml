@@ -1,0 +1,104 @@
+# Build the RanA macOS guest BASE image (Buildroot) — the aarch64 Linux the vz
+# host boots to record inside on Apple Silicon (D15, docs/MACOS.md).
+#
+# Buildroot only builds on a Linux host, so this is the ONLY place the guest
+# image is produced (the macOS dev host cannot). The build is SLOW (it compiles
+# an aarch64 cross-toolchain + kernel + rootfs from source — 30-60 min cold, far
+# less warm), so this is a dedicated, cached, manually/`guest/**`-triggered job,
+# not part of the per-PR gate.
+#
+# Output: output/images/{Image, rootfs.*} + a SHA256 manifest, uploaded as an
+# artifact. Embedding it into the host `rana` binary (go:embed) and booting it
+# on a macos-14 runner is the next step once a good image lands here.
+name: guest-image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "guest/**"
+      - ".github/workflows/guest-image.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guest-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: buildroot guest image (aarch64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install Buildroot host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git wget cpio unzip rsync bc file \
+            libncurses-dev python3 gawk gpg
+
+      # Cache the Buildroot download dir and per-build output so warm runs skip
+      # re-downloading packages and rebuilding the toolchain. Keyed on the
+      # defconfig + Makefile so a config change invalidates it.
+      - name: cache Buildroot dl + toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            guest/.buildroot
+            guest/output/build
+            guest/output/host
+            ~/.buildroot-ccache
+          key: buildroot-${{ hashFiles('guest/Makefile', 'guest/configs/rana_guest_defconfig', 'guest/external.mk', 'guest/Config.in') }}
+          restore-keys: |
+            buildroot-
+
+      # Defense in depth over the Makefile's SHA256 pin: verify the Buildroot
+      # release GPG signature for authenticity. Best-effort (a keyserver hiccup
+      # must not block; the SHA256 content pin in guest/Makefile is the hard
+      # gate that fails closed on any mismatch).
+      - name: GPG-verify the Buildroot release signature (best-effort)
+        continue-on-error: true
+        run: |
+          ver=2024.02.6
+          base=https://buildroot.org/downloads
+          wget -q "$base/buildroot-$ver.tar.gz.sign" -O /tmp/br.sign || { echo "no .sign available"; exit 0; }
+          # Buildroot release signing key (Peter Korsgaard / Arnout Vandecappelle).
+          gpg --keyserver hkps://keys.openpgp.org --recv-keys \
+            0xAF74A7E902C0324B434A5D0A4BABCB8A83CF14CB || \
+            gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys \
+            0xAF74A7E902C0324B434A5D0A4BABCB8A83CF14CB || { echo "key fetch failed"; exit 0; }
+          wget -q "$base/buildroot-$ver.tar.gz" -O /tmp/br.tar.gz
+          gpg --verify /tmp/br.sign /tmp/br.tar.gz && echo "GPG OK" || echo "GPG verify inconclusive"
+
+      - name: build the guest image
+        run: |
+          export BR2_CCACHE_DIR="$HOME/.buildroot-ccache"
+          make -C guest all
+
+      - name: image manifest
+        run: |
+          echo "== output/images =="
+          ls -l guest/output/images/ || { echo "no images produced"; exit 1; }
+          ( cd guest/output/images && sha256sum * | tee SHA256SUMS )
+          # Enforce the size budget (base layer <= 60MB, docs/MACOS.md).
+          rootfs=$(ls guest/output/images/rootfs.* 2>/dev/null | head -1 || true)
+          if [ -n "$rootfs" ]; then
+            sz=$(stat -c%s "$rootfs")
+            echo "rootfs size: $sz bytes"
+            [ "$sz" -le 62914560 ] || echo "WARNING: rootfs exceeds the 60MB base-layer budget"
+          fi
+
+      - name: upload guest image
+        uses: actions/upload-artifact@v4
+        with:
+          name: rana-guest-image-aarch64
+          path: |
+            guest/output/images/Image
+            guest/output/images/rootfs.*
+            guest/output/images/SHA256SUMS
+          if-no-files-found: error

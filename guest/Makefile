@@ -14,10 +14,11 @@
 BUILDROOT_VERSION := 2024.02.6
 BUILDROOT_TARBALL := buildroot-$(BUILDROOT_VERSION).tar.gz
 BUILDROOT_URL     := https://buildroot.org/downloads/$(BUILDROOT_TARBALL)
-# SHA256 of the pinned tarball. VERIFY and fill this in when pinning; the
-# fetch target fails closed if it does not match. (Left as a named placeholder
-# so an unverified download can never silently proceed.)
-BUILDROOT_SHA256  := PLACEHOLDER_PIN_THE_BUILDROOT_TARBALL_SHA256
+# SHA256 of the pinned tarball (buildroot-2024.02.6.tar.gz from
+# buildroot.org/downloads). The fetch target fails closed if the download does
+# not match. This pins CONTENT; the CI guest-image job additionally GPG-verifies
+# the Buildroot release signature for AUTHENTICITY (defense in depth).
+BUILDROOT_SHA256  := 1562e7e855e865799b12769f97b44ee6e79c8a43f1166872b38afdd7bfa9202f
 
 # --- Paths. -----------------------------------------------------------------
 GUEST_DIR   := $(CURDIR)

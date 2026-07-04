@@ -44,6 +44,10 @@ func TestAdoptAutoDetect_SingleAdoptableMatchProceeds(t *testing.T) {
 		List: fakeLister([]runningProcess{
 			{Pid: 42, ExePath: "/usr/local/bin/openclaw", Argv: []string{"openclaw", "gateway"}},
 		}),
+		// Deterministic corroboration: the outcome must not depend on whether
+		// ~/.openclaw happens to exist under the test runner's $HOME (it does
+		// on a dev box, not on a CI runner — the source of a real red-CI flake).
+		Corroborate: func(detectedCandidate) bool { return true },
 	})
 	if code != exitOK {
 		t.Fatalf("cmdAdoptAutoDetect: code=%d err=%q", code, errb.String())
@@ -53,6 +57,33 @@ func TestAdoptAutoDetect_SingleAdoptableMatchProceeds(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "openclaw") {
 		t.Fatalf("expected adoptPlatform output to mention openclaw, got: %q", out.String())
+	}
+}
+
+// TestAdoptAutoDetect_UncorroboratedMatchAsksToConfirm proves that when the
+// process match cannot be corroborated (no second signal), auto-detect does
+// NOT proceed into adoption — it reports the match and asks the user to adopt
+// explicitly. This is the same-uid-spoofing guard, now exercised
+// deterministically via injected corroboration.
+func TestAdoptAutoDetect_UncorroboratedMatchAsksToConfirm(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := cmdAdoptAutoDetect(adoptDetectParams{
+		DataDir: t.TempDir(),
+		Stdout:  &out,
+		Stderr:  &errb,
+		List: fakeLister([]runningProcess{
+			{Pid: 42, ExePath: "/usr/local/bin/openclaw", Argv: []string{"openclaw", "gateway"}},
+		}),
+		Corroborate: func(detectedCandidate) bool { return false },
+	})
+	if code != exitOK {
+		t.Fatalf("cmdAdoptAutoDetect: code=%d err=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "could not corroborate") {
+		t.Fatalf("expected an ask-to-confirm message, got: %q", out.String())
+	}
+	if strings.Contains(out.String(), "adopting") {
+		t.Fatalf("must NOT proceed to adoption on an uncorroborated match: %q", out.String())
 	}
 }
 

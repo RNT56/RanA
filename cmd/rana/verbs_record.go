@@ -101,13 +101,20 @@ func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 }
 
 // adoptDetectParams carries the parsed CLI state into cmdAdoptAutoDetect.
-// List is injectable so tests never touch a real process table.
+// List and Corroborate are injectable so tests never touch a real process
+// table or the real filesystem.
 type adoptDetectParams struct {
 	DataDir string
 	Assume  bool
 	Stdout  io.Writer
 	Stderr  io.Writer
 	List    processLister
+	// Corroborate reports whether an auto-detected candidate has a second,
+	// independent signal beyond the spoofable process match. Nil defaults to
+	// candidateCorroborated (which stats the profile's declared config dir);
+	// tests inject a deterministic function so the outcome does not depend on
+	// whatever happens to exist under the test runner's $HOME.
+	Corroborate func(detectedCandidate) bool
 }
 
 // cmdAdoptAutoDetect implements `rana adopt` with no target: scan running
@@ -160,7 +167,11 @@ func cmdAdoptAutoDetect(p adoptDetectParams) int {
 	// profile's declared config directory existing on disk — before saying
 	// "adopting"; otherwise report the match and make the user confirm
 	// explicitly (which targets the same fixed unit, but on their say-so).
-	if !candidateCorroborated(match) {
+	corroborate := p.Corroborate
+	if corroborate == nil {
+		corroborate = candidateCorroborated
+	}
+	if !corroborate(match) {
 		fmt.Fprintf(p.Stdout, "rana adopt: detected a process matching %s (pid %d), but could not corroborate it\n", match.Profile.Name, match.Proc.Pid)
 		fmt.Fprintf(p.Stdout, "  (its expected config dir %s was not found — the process name alone is not enough to adopt).\n", match.Profile.Adopt.ConfigDir)
 		fmt.Fprintf(p.Stdout, "If this is really your agent, adopt it explicitly:  rana adopt %s\n", match.Profile.Name)

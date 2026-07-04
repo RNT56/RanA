@@ -199,6 +199,11 @@ jobs:
           src_dir="bpf/src"
           [ -d internal/bpf/src ] && src_dir="internal/bpf/src"
           echo "compiling BPF C sources in $src_dir"
+          # The BPF target still pulls in <asm/types.h> via linux/types.h; on
+          # Debian/Ubuntu that header lives under the arch multiarch include
+          # dir (/usr/include/x86_64-linux-gnu), which clang's bpf target does
+          # not search by default. Add it explicitly.
+          arch_inc="/usr/include/$(uname -m)-linux-gnu"
           shopt -s nullglob
           found=0
           for c in "$src_dir"/*.c; do
@@ -207,6 +212,7 @@ jobs:
             clang -O2 -g -target bpf \
               -D__TARGET_ARCH_x86 \
               -I "$src_dir" \
+              -I "$arch_inc" \
               -c "$c" -o "/tmp/$(basename "$c" .c).bpf.o"
           done
           if [ "$found" = 0 ]; then
@@ -243,12 +249,15 @@ jobs:
         run: |
           set -o pipefail
           # Match real reads: /proc/<...>/environ path literals, or reading
-          # the environ/envp symbols. Exclude _test.go and vendored code.
+          # the environ/envp symbols. Exclude _test.go and vendored code, and
+          # drop pure `//`/`*` comment lines so a comment that merely DESCRIBES
+          # the ban ("never reads /proc/<pid>/environ") is not a false hit.
           hits="$(grep -RInE \
             '(/proc/[^"]*/environ)|(\benviron\b\s*\[)|(ReadFile\([^)]*environ)|(\benvp\b\s*\[)' \
             --include='*.go' \
             --exclude='*_test.go' \
-            cmd internal 2>/dev/null || true)"
+            cmd internal 2>/dev/null \
+            | grep -vE ':[0-9]+:[[:space:]]*(//|\*|/\*)' || true)"
           if [ -n "$hits" ]; then
             echo "P3 VIOLATION — env capture detected (envp / /proc/*/environ):"
             echo "$hits"

@@ -12,8 +12,8 @@ import (
 // listRunningProcesses (Linux) enumerates /proc/<pid>/{comm,cmdline} for
 // every numeric pid directory. It reads exactly two files per process —
 // comm (the kernel-truth executable basename) and cmdline (the NUL-joined
-// argv) — and NEVER /proc/<pid>/environ, per P3 ("envp/environ MUST NOT be
-// read anywhere"). A process that has exited or is unreadable (permission,
+// argv) — and NEVER the process environment block, per P3 ("envp/environ
+// MUST NOT be read anywhere"). A process that has exited or is unreadable (permission,
 // race with exit) between the readdir and the read is silently skipped:
 // this is a best-effort convenience scan, not a security boundary, and a
 // racy /proc is expected, not exceptional.

@@ -160,7 +160,21 @@ otherwise.
 | 2100 | Path2 | [2048]byte | NUL-padded; rename destination only |
 | **4148** | *(end)* | | total record size |
 
-## 5. `ConnectRecord` (kind=5, net.connect via cgroup/connect4·6) — 50 bytes
+Tier-2 note: `fentry/security_path_link` (`rana_path_link`,
+`bpf/src/rana_fs.c`) does not emit an `FsOpRecord` — hardlink creation is
+detected purely to re-pin the linked file's `(dev,inode)` into
+`rana_sensitive_inodes` when its existing path already matched a sensitive
+prefix rule (closing the hardlink-into-watchlist dodge in `LIMITS.md`).
+It is map-maintenance bookkeeping, not a new wire record, so no schema or
+decoder change is needed.
+
+## 5. `ConnectRecord` (kind=5, net.connect via cgroup/connect4·6 or lsm/socket_connect) — 50 bytes
+
+Tier-2 note: `lsm/socket_connect` (`rana_socket_connect`, gated to
+TierEnhanced+ by `internal/bpf/loader_tier.go`'s `WantedPrograms`) emits
+this exact wire shape too, closing the io_uring `IORING_OP_CONNECT`
+coverage gap documented in `LIMITS.md`. It is a second *producer* of
+kind=5, not a new kind — the collector's decoder is unaffected.
 
 | Offset | Field | Type | Notes |
 |---|---|---|---|

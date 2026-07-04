@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/RNT56/RanA/internal/redact"
@@ -43,15 +44,38 @@ func (r *newDomainRule) check(ev schema.Event) (firing, bool) {
 	// structurally incapable of carrying a secret.
 	var value redact.Redacted
 	var key string
+
+	// Egress-intelligence additive fields (local-only, zero network calls,
+	// D24): computed here because they depend on which triggering event
+	// shape fired the rule (net.dns vs net.connect) and, for net.connect,
+	// on Data already produced upstream by internal/collector.Enricher
+	// (the DNSCache join into Data["qname"] — enricher.go EnrichConnect).
+	var netClass redact.Redacted // net.connect only; absent for net.dns
+	var netClassSet bool
+	var asn redact.Redacted
+	dnsBypass := false // net.connect only: true iff no joined qname precursor
+	dnsRebind := false // net.dns only: true iff any answer is non-public
+
 	switch ev.Type {
 	case schema.EventTypeNetDNS:
 		qname, _ := ev.Data["qname"].(redact.Redacted)
 		key = string(qname)
 		value = qname
+		dnsRebind = anyAnswerNonPublic(ev.Data["answers"])
 	case schema.EventTypeNetConnect:
 		daddr, _ := ev.Data["daddr"].([]byte)
 		key = ipToDotted(daddr)
 		value = redact.Literal(key)
+		if ip := dottedToIP(key); ip != nil {
+			class, asnLabel := classifyIP(ip)
+			netClass, netClassSet = redact.Literal(class), true
+			if asnLabel != "" {
+				asn = redact.Literal(asnLabel)
+			}
+		}
+		if _, joined := ev.Data["qname"]; !joined {
+			dnsBypass = true
+		}
 	default:
 		return firing{}, false
 	}
@@ -71,11 +95,142 @@ func (r *newDomainRule) check(ev schema.Event) (firing, bool) {
 
 	return firing{
 		synth: func(session string, seg, idx, tsMono, tsWall uint64, pid uint32) schema.Event {
-			return schema.NewAlertNewDomain(session, seg, idx, tsMono, tsWall, pid, value)
+			alertEv := schema.NewAlertNewDomain(session, seg, idx, tsMono, tsWall, pid, value)
+			if netClassSet {
+				alertEv.Data["net_class"] = netClass
+				if asn != "" {
+					alertEv.Data["asn"] = asn
+				}
+			}
+			alertEv.Data["dns_bypass"] = dnsBypass
+			alertEv.Data["dns_rebind"] = dnsRebind
+			return alertEv
 		},
 		title: "RanA: new destination",
 		body:  fmt.Sprintf("first contact: %s", key),
 	}, true
+}
+
+// dottedToIP parses a dotted-quad or colon-hex rendering produced by
+// ipToDotted back into a net.IP for classification purposes. This is safe
+// under P3: the string being parsed is not captured free-text, it is the
+// same fixed-shape numeric address rendering ipToDotted already produced
+// from raw address bytes (see ipToDotted's doc comment) — classification
+// never touches raw captured strings.
+func dottedToIP(s string) net.IP {
+	if s == "" {
+		return nil
+	}
+	return net.ParseIP(s)
+}
+
+// anyAnswerNonPublic reports whether any of a net.dns event's Data["answers"]
+// ([]redact.Redacted, already passed through the redaction pipeline by
+// internal/collector.Enricher) parses as an IP address classified as
+// anything other than "public" — i.e. a DNS answer pointing at a private,
+// loopback, link-local, or CGNAT address (a "dns_rebind" signal: a public
+// domain name resolving somewhere it structurally should not). Answers that
+// fail to parse as a plain IP (e.g. because the redaction pipeline masked
+// them as entropy-shaped) are silently skipped — no fact is fabricated from
+// a value RanA can no longer read.
+func anyAnswerNonPublic(v any) bool {
+	answers, ok := v.([]redact.Redacted)
+	if !ok {
+		return false
+	}
+	for _, a := range answers {
+		ip := dottedToIP(string(a))
+		if ip == nil {
+			continue
+		}
+		if class, _ := classifyIP(ip); class != "public" {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- coarse net classification + curated ASN-prefix table (D24: local
+// only, zero network calls, embedded at build time) ----
+
+// classifyIP returns a coarse net_class ("private", "loopback",
+// "link_local", "cgnat", "public") for ip, plus a curated ASN/org label if
+// ip falls within curatedASNPrefixes (empty string if no match — most
+// public addresses have no entry; the table is intentionally small and is
+// NOT a reputation service, just a handful of well-known, stable anchors
+// useful for narrating a timeline, e.g. "this is Google DNS").
+func classifyIP(ip net.IP) (class string, asn string) {
+	if ip.IsLoopback() {
+		return "loopback", ""
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return "link_local", ""
+	}
+	if isCGNAT(ip) {
+		return "cgnat", ""
+	}
+	if ip.IsPrivate() {
+		return "private", ""
+	}
+	for _, p := range curatedASNPrefixes {
+		if p.network.Contains(ip) {
+			return "public", p.label
+		}
+	}
+	return "public", ""
+}
+
+// cgnatBlock is 100.64.0.0/10, RFC 6598 — carrier-grade NAT space. Go's
+// net.IP.IsPrivate() (RFC 1918 + RFC 4193) does not classify this range, so
+// RanA checks it explicitly: CGNAT addresses are not internet-routable but
+// are also not classic "private" LAN space, and treating them as plain
+// "public" would misrepresent an address the agent's own ISP assigned it
+// behind, not one it reached out to on the open internet.
+var cgnatBlock = func() *net.IPNet {
+	_, n, err := net.ParseCIDR("100.64.0.0/10")
+	if err != nil {
+		panic(err) // unreachable: compile-time-constant, valid CIDR
+	}
+	return n
+}()
+
+func isCGNAT(ip net.IP) bool {
+	return cgnatBlock.Contains(ip)
+}
+
+// asnPrefix is one curated, embedded (ip-prefix -> label) anchor. Values are
+// hand-picked, well-known, stable network operators chosen for narrating a
+// timeline ("first contact: 8.8.8.8 (Google Public DNS)") — this is
+// explicitly NOT an IP-reputation or geolocation database, has no update
+// mechanism, and never makes a network call to resolve or refresh (D24, plan
+// §2 scope walls: RanA does no phone-home, no third-party lookups).
+type asnPrefix struct {
+	network *net.IPNet
+	label   string
+}
+
+func mustPrefix(cidr, label string) asnPrefix {
+	_, n, err := net.ParseCIDR(cidr)
+	if err != nil {
+		panic(err) // unreachable: cidr values below are compile-time constants
+	}
+	return asnPrefix{network: n, label: label}
+}
+
+// curatedASNPrefixes is intentionally tiny — a handful of well-known,
+// long-lived anchor blocks, not a general ASN database. Order does not
+// matter (ranges are disjoint by construction).
+var curatedASNPrefixes = []asnPrefix{
+	mustPrefix("8.8.8.0/24", "Google Public DNS"),
+	mustPrefix("8.8.4.0/24", "Google Public DNS"),
+	mustPrefix("1.1.1.0/24", "Cloudflare Public DNS"),
+	mustPrefix("9.9.9.0/24", "Quad9 Public DNS"),
+	mustPrefix("140.82.112.0/20", "GitHub"),
+	mustPrefix("13.107.42.0/24", "Microsoft"),
+	mustPrefix("172.217.0.0/16", "Google"),
+	mustPrefix("142.250.0.0/15", "Google"),
+	mustPrefix("104.16.0.0/13", "Cloudflare"),
+	mustPrefix("151.101.0.0/16", "Fastly"),
 }
 
 // ipToDotted renders a 16-byte v4-mapped address as dotted-quad text, or

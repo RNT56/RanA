@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/RNT56/RanA/internal/profile"
 )
@@ -52,6 +53,13 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 // cmdAdopt adopts a long-running agent (the openclaw hero path) into a
 // recorded session. Detection and the systemd/guest placement are
 // platform-specific (adoptPlatform).
+//
+// With an explicit target (`rana adopt openclaw`), behavior is unchanged
+// from before auto-detect existed. With NO target, it scans running
+// processes (detect.go/detect_linux.go/detect_darwin.go) for a match
+// against the shipped adoptable packs and either adopts a single
+// unambiguous, adoptable match or prints what it found so the user can
+// pick explicitly — it never guesses among multiple candidates.
 func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("adopt", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -60,11 +68,18 @@ func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
-	target := "openclaw"
-	if fs.NArg() >= 1 {
-		target = fs.Arg(0)
+
+	if fs.NArg() == 0 {
+		return cmdAdoptAutoDetect(adoptDetectParams{
+			DataDir: *dataDir,
+			Assume:  *yes,
+			Stdout:  stdout,
+			Stderr:  stderr,
+			List:    listRunningProcesses,
+		})
 	}
 
+	target := fs.Arg(0)
 	prof, err := profile.Load(target)
 	if err != nil {
 		fmt.Fprintf(stderr, "rana adopt: no profile named %q (try: openclaw): %v\n", target, err)
@@ -82,6 +97,71 @@ func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 		Assume:  *yes,
 		Stdout:  stdout,
 		Stderr:  stderr,
+	})
+}
+
+// adoptDetectParams carries the parsed CLI state into cmdAdoptAutoDetect.
+// List is injectable so tests never touch a real process table.
+type adoptDetectParams struct {
+	DataDir string
+	Assume  bool
+	Stdout  io.Writer
+	Stderr  io.Writer
+	List    processLister
+}
+
+// cmdAdoptAutoDetect implements `rana adopt` with no target: scan running
+// processes, match against the shipped adoptable packs
+// (adoptableProfileNames), and either proceed (single adoptable match) or
+// report what was found without guessing (zero, or more than one, match —
+// or a match whose profile has no [adopt] section, e.g. claude-code/codex
+// today, which are recognizable but not yet in-place-adoptable).
+func cmdAdoptAutoDetect(p adoptDetectParams) int {
+	candidates, err := detectAdoptCandidates(p.List)
+	if err != nil {
+		fmt.Fprintf(p.Stderr, "rana adopt: scanning running processes: %v\n", err)
+		return exitUsage
+	}
+
+	if len(candidates) == 0 {
+		fmt.Fprintln(p.Stdout, "rana adopt: no running adoptable agent detected (looked for: "+strings.Join(adoptableProfileNames, ", ")+").")
+		fmt.Fprintln(p.Stdout, "Start the agent first, or adopt explicitly:  rana adopt <profile>")
+		return exitOK
+	}
+
+	var adoptable []detectedCandidate
+	for _, c := range candidates {
+		if c.Profile.Adopt != nil {
+			adoptable = append(adoptable, c)
+		}
+	}
+
+	if len(candidates) > 1 || len(adoptable) != 1 {
+		fmt.Fprintln(p.Stdout, "rana adopt: detected the following running agent(s):")
+		for _, c := range candidates {
+			note := ""
+			if c.Profile.Adopt == nil {
+				note = "  (no [adopt] section — recognized, but not yet adoptable in place)"
+			}
+			fmt.Fprintf(p.Stdout, "  - %s  (pid %d)%s\n", c.Profile.Name, c.Proc.Pid, note)
+		}
+		if len(adoptable) == 0 {
+			fmt.Fprintln(p.Stdout, "\nNone of these can be adopted in place yet. See `rana adopt <profile>` for the full list.")
+			return exitOK
+		}
+		fmt.Fprintln(p.Stdout, "\nMultiple candidates found — pick one explicitly:  rana adopt <profile>")
+		return exitOK
+	}
+
+	match := adoptable[0]
+	fmt.Fprintf(p.Stdout, "rana adopt: detected %s (pid %d) — adopting.\n", match.Profile.Name, match.Proc.Pid)
+	return adoptPlatform(adoptParams{
+		Profile: match.Profile,
+		Target:  match.Profile.Name,
+		DataDir: p.DataDir,
+		Assume:  p.Assume,
+		Stdout:  p.Stdout,
+		Stderr:  p.Stderr,
 	})
 }
 

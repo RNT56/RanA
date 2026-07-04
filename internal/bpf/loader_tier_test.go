@@ -105,6 +105,85 @@ func TestTierFeatures(t *testing.T) {
 	}
 }
 
+// TestTierFeaturesLSMSocketConnect asserts the io_uring-closing LSM hook
+// (rana_socket_connect, bpf/src/rana_net.c) is gated to TierEnhanced+
+// (docs/ARCHITECTURE.md §7: BPF LSM attachment is a well-supported, stable
+// mechanism from the kprobe-multi tier up) and absent at baseline/
+// unsupported — coverage, not a v1-completeness requirement (D5).
+func TestTierFeaturesLSMSocketConnect(t *testing.T) {
+	if TierBaseline.Features().LSMSocketConnect {
+		t.Fatal("baseline tier must not claim LSMSocketConnect coverage")
+	}
+	if TierUnsupported.Features().LSMSocketConnect {
+		t.Fatal("unsupported tier must not claim LSMSocketConnect coverage")
+	}
+	if !TierEnhanced.Features().LSMSocketConnect {
+		t.Fatal("enhanced tier must add LSMSocketConnect coverage")
+	}
+	if !TierPreferred.Features().LSMSocketConnect {
+		t.Fatal("preferred tier must retain LSMSocketConnect coverage")
+	}
+}
+
+// TestWantedProgramsBaselineHookSet asserts the complete v1 hook set (D5:
+// "the product is complete at Baseline") is wanted at every supported
+// tier, including the hardlink re-pin hook (rana_path_link) which closes
+// a documented watchlist dodge and is not gated to any higher tier — it
+// uses only a plain fentry attach, available since the 5.15 floor.
+func TestWantedProgramsBaselineHookSet(t *testing.T) {
+	for _, tier := range []Tier{TierBaseline, TierEnhanced, TierPreferred} {
+		progs := WantedPrograms(tier)
+		mustContain(t, tier, progs, "rana_on_exec")
+		mustContain(t, tier, progs, "rana_on_fork")
+		mustContain(t, tier, progs, "rana_on_exit")
+		mustContain(t, tier, progs, "rana_connect4")
+		mustContain(t, tier, progs, "rana_connect6")
+		mustContain(t, tier, progs, "rana_sendmsg4")
+		mustContain(t, tier, progs, "rana_sendmsg6")
+		mustContain(t, tier, progs, "rana_unix_connect")
+		mustContain(t, tier, progs, "rana_flow_close")
+		mustContain(t, tier, progs, "rana_file_open")
+		mustContain(t, tier, progs, "rana_path_unlink")
+		mustContain(t, tier, progs, "rana_path_rename")
+		mustContain(t, tier, progs, "rana_path_mkdir")
+		mustContain(t, tier, progs, "rana_vfs_truncate")
+		mustContain(t, tier, progs, "rana_path_link")
+		mustContain(t, tier, progs, "rana_dns_egress")
+		mustContain(t, tier, progs, "rana_cgroup_attach_task")
+	}
+}
+
+// TestWantedProgramsGatesLSMSocketConnect asserts rana_socket_connect
+// (the io_uring-closing LSM hook) is wanted ONLY at TierEnhanced+, never
+// at baseline or unsupported — the concrete expression of D5's "higher
+// tiers are efficiency and coverage, not features" for this specific hook.
+func TestWantedProgramsGatesLSMSocketConnect(t *testing.T) {
+	if progs := WantedPrograms(TierUnsupported); len(progs) != 0 {
+		t.Fatalf("WantedPrograms(TierUnsupported) = %v, want empty (nothing attaches on an unsupported kernel)", progs)
+	}
+	if containsString(WantedPrograms(TierBaseline), "rana_socket_connect") {
+		t.Fatal("rana_socket_connect must NOT be wanted at TierBaseline")
+	}
+	mustContain(t, TierEnhanced, WantedPrograms(TierEnhanced), "rana_socket_connect")
+	mustContain(t, TierPreferred, WantedPrograms(TierPreferred), "rana_socket_connect")
+}
+
+func mustContain(t *testing.T, tier Tier, got []string, want string) {
+	t.Helper()
+	if !containsString(got, want) {
+		t.Fatalf("WantedPrograms(%v) = %v, missing %q", tier, got, want)
+	}
+}
+
+func containsString(got []string, want string) bool {
+	for _, g := range got {
+		if g == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestParseKernelRelease covers the uname-release parsing that feeds
 // TierForKernel from a raw `uname -r`-shaped string (e.g. from
 // golang.org/x/sys/unix.Uname on linux, or a doctor-probe string on any

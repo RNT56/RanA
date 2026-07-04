@@ -1,0 +1,54 @@
+# RanA profile: generic-ci
+# A CI-runner agent (e.g. an agent invoked non-interactively from a CI
+# pipeline job). Matching is argv-shaped, not env-shaped: per P3, RanA never
+# reads envp/environ, so "CI" is recognized from argv markers a CI wrapper or
+# job script commonly passes on the command line, never from CI env vars
+# (CI=true, GITHUB_ACTIONS, etc. are invisible to RanA by design).
+# CI runners are short-lived and high-volume, so this pack keeps capture
+# broad (nothing below the D7 baseline is narrowed) but shortens retention.
+
+[profile]
+name        = "generic-ci"
+description = "CI-runner agent — broad capture, argv-recognized, short retention."
+version     = 1
+
+[match]
+auto = true
+# argv-based CI markers only (never env values, per P3): a CI wrapper script
+# or job step that names itself/its mode on the command line.
+argv_contains = ["--ci", "--non-interactive", "ci-runner", "--headless"]
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true
+
+[digest]
+# CI jobs typically operate on a freshly checked-out workspace; digest it all.
+scopes = ["$SESSION_CWD/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**"]
+
+[sensitive_read]
+extra = [
+  "~/.netrc",             # CI runners frequently use netrc-based git auth
+  "~/.config/gh/**",
+  "~/.npmrc",
+  "~/.docker/config.json",   # registry credential store CI jobs commonly touch
+  "~/.pypirc",
+  "~/.cargo/credentials*",
+]
+
+[markers]
+enabled = false          # no first-party marker channel; causality via process tree + time
+
+[timeline]
+lens = "tree"
+
+[retention]
+# CI runs are numerous and short-lived; a stranger auditing a CI agent wants
+# recent history, not months of it. Shorter than the coding-agent default.
+ttl_days = 7

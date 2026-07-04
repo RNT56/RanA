@@ -1,0 +1,47 @@
+# RanA profile: aider
+# aider — terminal-based AI pair-programming CLI, typically invoked inside a
+# git working tree and driven directly from a shell.
+
+[profile]
+name        = "aider"
+description = "aider CLI — repo-scoped AI pair-programming coding agent."
+version     = 1
+
+[match]
+auto = true
+exe_basename = ["aider"]
+# aider is usually installed as a pip console-script named "aider"; the
+# argv_contains fallback below covers `python -m aider` invocations.
+argv_contains = ["aider"]
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true
+
+[digest]
+# aider's whole job is editing the repo it was started in.
+scopes = ["$SESSION_CWD/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**"]
+
+[sensitive_read]
+extra = [
+  "~/.config/aider/**",   # aider's own config (model settings, API key files)
+  "~/.aider*",            # aider's dotfiles (history, input/chat cache) in $HOME
+  "~/.netrc",             # aider can fetch/push over HTTPS git remotes using this
+  "~/.config/gh/**",
+  "~/.npmrc",
+]
+
+[markers]
+enabled = false          # no first-party marker channel; causality via process tree + time
+
+[timeline]
+lens = "tree"             # process tree reads naturally for a coding session
+
+[retention]
+ttl_days = 30

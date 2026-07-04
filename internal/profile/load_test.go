@@ -7,9 +7,9 @@ import (
 )
 
 // TestShippedPacks_ParseAndValidate is the CONTRACTS.md-required test that
-// all 4 shipped packs parse and pass validation.
+// all shipped packs parse and pass validation.
 func TestShippedPacks_ParseAndValidate(t *testing.T) {
-	for _, name := range []string{"generic", "claude-code", "codex", "openclaw"} {
+	for _, name := range []string{"generic", "claude-code", "codex", "openclaw", "aider", "cursor", "generic-ci"} {
 		t.Run(name, func(t *testing.T) {
 			p, err := Load(name)
 			if err != nil {
@@ -44,7 +44,7 @@ func TestOpenclawAdoptRoundTrips(t *testing.T) {
 		t.Errorf("openclaw Adopt = %#v, want %#v", *oc.Adopt, want)
 	}
 
-	for _, name := range []string{"generic", "claude-code", "codex"} {
+	for _, name := range []string{"generic", "claude-code", "codex", "aider", "cursor", "generic-ci"} {
 		t.Run(name, func(t *testing.T) {
 			p, err := Load(name)
 			if err != nil {
@@ -89,9 +89,12 @@ func TestLoadFile_NotFound(t *testing.T) {
 
 func TestAvailable_ListsShippedPacks(t *testing.T) {
 	names := Available()
-	want := map[string]bool{"generic": true, "claude-code": true, "codex": true, "openclaw": true}
+	want := map[string]bool{
+		"generic": true, "claude-code": true, "codex": true, "openclaw": true,
+		"aider": true, "cursor": true, "generic-ci": true,
+	}
 	if len(names) != len(want) {
-		t.Fatalf("Available() = %#v, want 4 entries", names)
+		t.Fatalf("Available() = %#v, want %d entries", names, len(want))
 	}
 	for _, n := range names {
 		if !want[n] {
@@ -111,7 +114,7 @@ func TestEmbeddedPacksMatchCanonicalSource(t *testing.T) {
 	if root == "" {
 		t.Skip("repo root profiles/ directory not found relative to test working directory; skipping drift check")
 	}
-	for _, name := range []string{"generic", "claude-code", "codex", "openclaw"} {
+	for _, name := range []string{"generic", "claude-code", "codex", "openclaw", "aider", "cursor", "generic-ci"} {
 		t.Run(name, func(t *testing.T) {
 			canonical, err := os.ReadFile(filepath.Join(root, name+".toml"))
 			if err != nil {

@@ -153,6 +153,19 @@ type ExecRecord struct {
 	Cwd           string
 	Argv          []string
 	ArgvTruncated bool
+
+	// ExeDigest and ExeDigestSet are NOT part of the wire record decoded
+	// by DecodeExecRecord (the ring buffer carries no file-content hash —
+	// hashing an executable is a userspace filesystem read, not a kernel
+	// event). A caller that has independently computed the BLAKE3 digest
+	// of ExePath's file contents (e.g. ranad, opportunistically, off the
+	// hot path) sets both fields before calling Enricher.EnrichExec so
+	// exe-provenance enrichment (internal/collector/provenance.go) can run;
+	// leaving ExeDigestSet false is always safe and simply omits the
+	// exe_first_seen/exe_changed/exe_known Data fields (P5: never fabricate
+	// a fact you don't have).
+	ExeDigest    [32]byte
+	ExeDigestSet bool
 }
 
 // DecodeExecRecord decodes a wire ExecRecord per internal/bpf/records.md §1.

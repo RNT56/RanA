@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RanA Export Verifier</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  This page is fully self-contained and offline-capable: it loads only
+  same-origin files (wasm_exec.js, rana-verify.wasm, main.js, style.css)
+  and makes no network request beyond those. No inline <script> or
+  inline event handlers are used anywhere in this file, so it works
+  cleanly under a strict Content-Security-Policy such as:
+
+    default-src 'self'; script-src 'self'; style-src 'self';
+    connect-src 'none'; img-src 'self'
+
+  Every export file you drop onto this page (docs/TRUST.md §7) is read
+  and verified entirely in your browser via WebAssembly
+  (cmd/rana-verify-wasm) — nothing is uploaded anywhere.
+-->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>RanA Export Verifier</h1>
+  <p class="lede">
+    Independently verifies a RanA export (docs/TRUST.md §7/§8) entirely in
+    your browser. No install, no server, no network call — the same
+    algorithm as <code>rana-verify-standalone</code>, running as
+    WebAssembly.
+  </p>
+
+  <section id="wasm-status" aria-live="polite">Loading verifier engine...</section>
+
+  <section>
+    <h2>1. Provide the export files</h2>
+    <p>
+      Drop the contents of your export directory below, or click to choose
+      files. Only the five files RanA's verification depends on are used;
+      any <code>.jsonl</code> convenience copies are ignored.
+    </p>
+    <div id="drop-zone" tabindex="0" role="button" aria-label="Drop export files here or click to choose">
+      <p>Drop export files here, or click to choose</p>
+      <input id="file-input" type="file" multiple hidden>
+    </div>
+    <ul id="file-list" aria-label="Detected export files"></ul>
+  </section>
+
+  <section>
+    <h2>2. Verify</h2>
+    <button id="run-verify" type="button" disabled>Verify export</button>
+  </section>
+
+  <section id="result" class="result" hidden>
+    <h2>Result: <span id="result-verdict"></span></h2>
+    <p id="result-summary"></p>
+    <ul id="result-details"></ul>
+  </section>
+
+  <footer>
+    <p>
+      Spec: docs/TRUST.md §8. Reference native CLI:
+      <code>rana-verify-standalone &lt;export-dir&gt;</code>. This page and
+      the CLI share the same Go verification core
+      (<code>internal/exportverify</code>), so they agree by construction.
+    </p>
+  </footer>
+</main>
+<script src="wasm_exec.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

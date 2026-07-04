@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/RNT56/RanA/internal/ledger"
+	"github.com/RNT56/RanA/internal/report"
+	"github.com/RNT56/RanA/internal/service"
 )
 
 // defaultHeadsLogPath is where ranad's root-owned, append-only checkpoint
@@ -92,13 +96,19 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	return res.Code
 }
 
-// cmdExport writes a portable, independently-verifiable proof pack.
+// cmdExport writes a portable, independently-verifiable proof pack, or (with
+// --format incident) a human-readable incident narrative built from the same
+// recorded events. These are two different renderings of one session's
+// truth, not two verbs — hence flags on the frozen `export` verb rather than
+// a new one (plan D20).
 func cmdExport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dataDir := fs.String("data", defaultDataDir(), "RanA data directory")
 	session := fs.String("session", "", "session id to export (required)")
-	out := fs.String("out", "", "output directory (required)")
+	out := fs.String("out", "", "output directory (proof pack) or output file (--format incident; default stdout)")
+	format := fs.String("format", "proof", "output shape: proof (default, docs/TRUST.md export) | incident (Markdown narrative, internal/report.IncidentReport)")
+	pack := fs.Bool("pack", false, "bundle the export plus the offline verifier viewer into a single <session>.ranaproof archive (proof format only)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -109,17 +119,97 @@ func cmdExport(args []string, stdout, stderr io.Writer) int {
 	if *out == "" && fs.NArg() >= 2 {
 		*out = fs.Arg(1)
 	}
-	if *session == "" || *out == "" {
-		fmt.Fprintln(stderr, "rana export: --session and --out (or positional <session> <out>) are required")
+	if *session == "" {
+		fmt.Fprintln(stderr, "rana export: --session (or positional <session>) is required")
 		return exitUsage
 	}
 
-	if err := ledger.Export(ledger.Dir(*dataDir), *session, *out); err != nil {
+	switch *format {
+	case "proof":
+		return cmdExportProof(*dataDir, *session, *out, *pack, stdout, stderr)
+	case "incident":
+		if *pack {
+			fmt.Fprintln(stderr, "rana export: --pack applies only to --format proof")
+			return exitUsage
+		}
+		return cmdExportIncident(*dataDir, *session, *out, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "rana export: unknown --format %q (want: proof|incident)\n", *format)
+		return exitUsage
+	}
+}
+
+// cmdExportProof implements the original `rana export` behavior: writing
+// docs/TRUST.md §7's export directory, optionally (--pack) bundled into a
+// single self-contained <session>.ranaproof archive alongside the offline
+// verifier viewer (pack.go).
+func cmdExportProof(dataDir, session, out string, pack bool, stdout, stderr io.Writer) int {
+	if out == "" {
+		fmt.Fprintln(stderr, "rana export: --out (or positional <out>) is required for --format proof")
+		return exitUsage
+	}
+
+	exportDir := out
+	if pack {
+		// Export to a scratch directory first, then bundle it — --pack's
+		// --out names the .ranaproof file/archive, not a loose directory of
+		// export files.
+		tmp, err := os.MkdirTemp("", "rana-export-*")
+		if err != nil {
+			fmt.Fprintf(stderr, "rana export: preparing pack: %v\n", err)
+			return exitUsage
+		}
+		defer os.RemoveAll(tmp)
+		exportDir = tmp
+	}
+
+	if err := ledger.Export(ledger.Dir(dataDir), session, exportDir); err != nil {
 		fmt.Fprintf(stderr, "rana export: %v\n", err)
 		return exitUsage
 	}
-	fmt.Fprintf(stdout, "Exported session %s to %s\n", *session, *out)
-	fmt.Fprintln(stdout, "Verify it anywhere with: rana-verify-standalone "+*out)
+
+	if !pack {
+		fmt.Fprintf(stdout, "Exported session %s to %s\n", session, out)
+		fmt.Fprintln(stdout, "Verify it anywhere with: rana-verify-standalone "+out)
+		return exitOK
+	}
+
+	packPath := out
+	if err := writeProofPack(exportDir, packPath, session); err != nil {
+		fmt.Fprintf(stderr, "rana export: %v\n", err)
+		return exitUsage
+	}
+	fmt.Fprintf(stdout, "Wrote proof pack for session %s to %s\n", session, packPath)
+	fmt.Fprintln(stdout, "Open it anywhere: extract, then open viewer/index.html in a browser")
+	fmt.Fprintln(stdout, "  (or run rana-verify-standalone on the exports/ directory inside it).")
+	return exitOK
+}
+
+// cmdExportIncident renders internal/report.IncidentReport for session to
+// stdout, or to a file when out is non-empty.
+func cmdExportIncident(dataDir, session, out string, stdout, stderr io.Writer) int {
+	ds, err := service.NewLedgerDataSource(ledger.Dir(dataDir))
+	if err != nil {
+		fmt.Fprintf(stderr, "rana export: %v\n", err)
+		return exitUsage
+	}
+	defer ds.Close()
+
+	text, err := report.IncidentReport(context.Background(), reportDataSource{inner: ds}, session)
+	if err != nil {
+		fmt.Fprintf(stderr, "rana export: %v\n", err)
+		return exitUsage
+	}
+
+	if out == "" {
+		fmt.Fprint(stdout, text)
+		return exitOK
+	}
+	if err := os.WriteFile(out, []byte(text), 0o644); err != nil {
+		fmt.Fprintf(stderr, "rana export: writing %s: %v\n", out, err)
+		return exitUsage
+	}
+	fmt.Fprintf(stdout, "Wrote incident report for session %s to %s\n", session, out)
 	return exitOK
 }
 

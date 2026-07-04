@@ -82,6 +82,26 @@ func connectEvent(session string, seg, idx uint64, pid uint32, daddr []byte) sch
 	return schema.NewNetConnect(session, seg, idx, 1, 1, pid, "tcp", daddr, 443, "AF_INET")
 }
 
+// connectEventWithQname builds a net.connect event that carries a joined
+// Data["qname"] field, mirroring what internal/collector.Enricher produces
+// when its DNSCache.Join succeeds for daddr within the join window (see
+// enricher.go EnrichConnect). Its absence (plain connectEvent) is what
+// dns_bypass detection keys off: a connect with no preceding, joinable DNS
+// answer for that address.
+func connectEventWithQname(session string, seg, idx uint64, pid uint32, daddr []byte, qname string) schema.Event {
+	ev := connectEvent(session, seg, idx, pid, daddr)
+	ev.Data["qname"] = redact.Literal(qname)
+	return ev
+}
+
+func dnsEventWithAnswers(session string, seg, idx uint64, pid uint32, qname string, answers ...string) schema.Event {
+	red := make([]redact.Redacted, 0, len(answers))
+	for _, a := range answers {
+		red = append(red, redact.Literal(a))
+	}
+	return schema.NewNetDNS(session, seg, idx, 1, 1, pid, redact.Literal(qname), red, 300)
+}
+
 func sensitiveReadEvent(session string, seg, idx uint64, pid uint32, path, rule string) schema.Event {
 	return schema.NewFsSensitiveRead(session, seg, idx, 1, 1, pid, redact.Literal(path), redact.Literal(rule))
 }
@@ -221,6 +241,280 @@ func TestNewDomainRule_EmptyQnameIgnored(t *testing.T) {
 	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
 	if len(alerts) != 0 {
 		t.Errorf("got %d alert.new_domain for empty qname, want 0", len(alerts))
+	}
+}
+
+// ---- egress intelligence: net_class ----
+
+func TestNewDomainRule_NetClassPrivate(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "10.1.2.3")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	if len(alerts) != 1 {
+		t.Fatalf("got %d alert.new_domain events, want 1", len(alerts))
+	}
+	class, _ := alerts[0].Data["net_class"].(redact.Redacted)
+	if string(class) != "private" {
+		t.Errorf("net_class = %q, want %q", class, "private")
+	}
+}
+
+func TestNewDomainRule_NetClassLoopback(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "127.0.0.1")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	class, _ := alerts[0].Data["net_class"].(redact.Redacted)
+	if string(class) != "loopback" {
+		t.Errorf("net_class = %q, want %q", class, "loopback")
+	}
+}
+
+func TestNewDomainRule_NetClassLinkLocal(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "169.254.1.1")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	class, _ := alerts[0].Data["net_class"].(redact.Redacted)
+	if string(class) != "link_local" {
+		t.Errorf("net_class = %q, want %q", class, "link_local")
+	}
+}
+
+func TestNewDomainRule_NetClassCGNAT(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "100.64.5.5")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	class, _ := alerts[0].Data["net_class"].(redact.Redacted)
+	if string(class) != "cgnat" {
+		t.Errorf("net_class = %q, want %q", class, "cgnat")
+	}
+}
+
+func TestNewDomainRule_NetClassPublic(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	class, _ := alerts[0].Data["net_class"].(redact.Redacted)
+	if string(class) != "public" {
+		t.Errorf("net_class = %q, want %q", class, "public")
+	}
+}
+
+func TestNewDomainRule_NetClassKnownASNPrefix(t *testing.T) {
+	// Locks in that a curated, embedded ASN-prefix hit annotates an "asn"
+	// field in addition to net_class=public — no network lookup, purely a
+	// small embedded table match (D24: zero network calls).
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "8.8.8.8") // curated table entry: Google DNS
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	class, _ := alerts[0].Data["net_class"].(redact.Redacted)
+	if string(class) != "public" {
+		t.Errorf("net_class = %q, want %q", class, "public")
+	}
+	asn, ok := alerts[0].Data["asn"].(redact.Redacted)
+	if !ok || asn == "" {
+		t.Errorf("asn = %q, want a non-empty curated-table label for 8.8.8.8", asn)
+	}
+}
+
+func TestNewDomainRule_NetClassAppliesToDNSTriggeredAlertsToo(t *testing.T) {
+	// net_class is computed on whatever address information the triggering
+	// event carries; for a net.dns first-contact, that's the qname itself
+	// (not an address) so net_class must not be fabricated — it is only
+	// meaningful for IP-addressed contacts (net.connect). This locks in that
+	// a qname-triggered new_domain does NOT carry a net_class field.
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	if err := eng.Observe(dnsEvent("sess-1", 0, 0, 1, "example.com"), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	if _, ok := alerts[0].Data["net_class"]; ok {
+		t.Errorf("qname-triggered alert.new_domain carries net_class = %v, want absent (no address to classify)", alerts[0].Data["net_class"])
+	}
+}
+
+// ---- egress intelligence: dns_bypass ----
+
+func TestNewDomainRule_DNSBypassTrueWhenNoPrecedingDNS(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	bypass, _ := alerts[0].Data["dns_bypass"].(bool)
+	if !bypass {
+		t.Errorf("dns_bypass = %v, want true (connect with no joined qname)", bypass)
+	}
+}
+
+func TestNewDomainRule_DNSBypassFalseWhenQnameJoined(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	ev := connectEventWithQname("sess-1", 0, 0, 1, daddr, "example.com")
+	if err := eng.Observe(ev, 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	bypass, _ := alerts[0].Data["dns_bypass"].(bool)
+	if bypass {
+		t.Errorf("dns_bypass = %v, want false (connect carried a joined qname)", bypass)
+	}
+}
+
+func TestNewDomainRule_DNSBypassAbsentForQnameTrigger(t *testing.T) {
+	// dns_bypass is a property of an address-only contact lacking a DNS
+	// precursor; a net.dns-triggered new_domain IS the DNS lookup, so
+	// dns_bypass is meaningless there and must be false, not fabricated.
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	if err := eng.Observe(dnsEvent("sess-1", 0, 0, 1, "example.com"), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	bypass, _ := alerts[0].Data["dns_bypass"].(bool)
+	if bypass {
+		t.Errorf("dns_bypass = %v, want false for a net.dns-triggered alert", bypass)
+	}
+}
+
+// ---- egress intelligence: dns_rebind ----
+
+func TestNewDomainRule_DNSRebindTrueWhenAnswerIsPrivate(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	ev := dnsEventWithAnswers("sess-1", 0, 0, 1, "evil.example.com", "10.0.0.5")
+	if err := eng.Observe(ev, 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	rebind, _ := alerts[0].Data["dns_rebind"].(bool)
+	if !rebind {
+		t.Errorf("dns_rebind = %v, want true (answer resolves to a private address)", rebind)
+	}
+}
+
+func TestNewDomainRule_DNSRebindTrueWhenAnswerIsLoopback(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	ev := dnsEventWithAnswers("sess-1", 0, 0, 1, "evil.example.com", "127.0.0.1")
+	if err := eng.Observe(ev, 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	rebind, _ := alerts[0].Data["dns_rebind"].(bool)
+	if !rebind {
+		t.Errorf("dns_rebind = %v, want true (answer resolves to loopback)", rebind)
+	}
+}
+
+func TestNewDomainRule_DNSRebindFalseWhenAllAnswersPublic(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	ev := dnsEventWithAnswers("sess-1", 0, 0, 1, "example.com", "93.184.216.34", "93.184.216.35")
+	if err := eng.Observe(ev, 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	rebind, _ := alerts[0].Data["dns_rebind"].(bool)
+	if rebind {
+		t.Errorf("dns_rebind = %v, want false (all answers public)", rebind)
+	}
+}
+
+func TestNewDomainRule_DNSRebindAbsentForConnectTrigger(t *testing.T) {
+	// dns_rebind is a property of a DNS answer set; a net.connect-triggered
+	// new_domain carries no answer set to evaluate, so dns_rebind must be
+	// false, not fabricated.
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn)
+
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 1, daddr), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	alerts := filterType(sk.events, schema.EventTypeAlertNewDomain)
+	rebind, _ := alerts[0].Data["dns_rebind"].(bool)
+	if rebind {
+		t.Errorf("dns_rebind = %v, want false for a net.connect-triggered alert", rebind)
 	}
 }
 
@@ -633,6 +927,287 @@ func TestEngine_IgnoresEventsNoRuleCaresAbout(t *testing.T) {
 	}
 	if len(fn.Calls) != 0 {
 		t.Errorf("got %d notifications for a proc.fork with no matching rule, want 0", len(fn.Calls))
+	}
+}
+
+// ---- sensitive-read trifecta correlation (D9 "trifecta precursor") ----
+
+func TestTrifecta_SensitiveReadThenNewDomainWithinWindowEscalates(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 0, 0, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe sensitive_read: %v", err)
+	}
+	clk.Advance(5 * time.Second)
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 1, 42, daddr), 0); err != nil {
+		t.Fatalf("Observe new_domain trigger: %v", err)
+	}
+
+	reads := filterType(sk.events, schema.EventTypeAlertSensitiveRead)
+	if len(reads) != 2 {
+		t.Fatalf("got %d alert.sensitive_read events, want 2 (original passthrough + escalated correlation)", len(reads))
+	}
+	// The first is the original, unescalated passthrough.
+	if _, ok := reads[0].Data["exfil_precursor"]; ok {
+		t.Errorf("original alert.sensitive_read carries exfil_precursor = %v, want absent (append-only: original must be untouched)", reads[0].Data["exfil_precursor"])
+	}
+	// The second is the escalated correlation event.
+	escalated := reads[1]
+	precursor, _ := escalated.Data["exfil_precursor"].(bool)
+	if !precursor {
+		t.Fatalf("escalated alert.sensitive_read exfil_precursor = %v, want true", precursor)
+	}
+	sev, _ := escalated.Data["severity"].(redact.Redacted)
+	if string(sev) != "high" {
+		t.Errorf("escalated severity = %q, want %q", sev, "high")
+	}
+	host, ok := escalated.Data["correlated_host"].(redact.Redacted)
+	if !ok || string(host) != "93.184.216.34" {
+		t.Errorf("escalated correlated_host = %v, want %q", escalated.Data["correlated_host"], "93.184.216.34")
+	}
+	path, _ := escalated.Data["path"].(redact.Redacted)
+	if string(path) != "/home/user/.ssh/id_ed25519" {
+		t.Errorf("escalated path = %q, want original sensitive path preserved", path)
+	}
+}
+
+func TestTrifecta_NewDomainThenSensitiveReadWithinWindowEscalates(t *testing.T) {
+	// Order must not matter: new_domain first, sensitive_read second, still
+	// within the window, must still escalate (D9: "either order").
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 42, daddr), 0); err != nil {
+		t.Fatalf("Observe new_domain trigger: %v", err)
+	}
+	clk.Advance(5 * time.Second)
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 0, 1, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe sensitive_read: %v", err)
+	}
+
+	reads := filterType(sk.events, schema.EventTypeAlertSensitiveRead)
+	if len(reads) != 2 {
+		t.Fatalf("got %d alert.sensitive_read events, want 2 (original passthrough + escalated correlation)", len(reads))
+	}
+	escalated := reads[1]
+	precursor, _ := escalated.Data["exfil_precursor"].(bool)
+	if !precursor {
+		t.Fatalf("escalated alert.sensitive_read exfil_precursor = %v, want true (new_domain-then-sensitive_read order)", precursor)
+	}
+	host, _ := escalated.Data["correlated_host"].(redact.Redacted)
+	if string(host) != "93.184.216.34" {
+		t.Errorf("escalated correlated_host = %q, want %q", host, "93.184.216.34")
+	}
+}
+
+func TestTrifecta_OutsideWindowDoesNotEscalate(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 0, 0, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe sensitive_read: %v", err)
+	}
+	clk.Advance(31 * time.Second) // just past the window
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 1, 42, daddr), 0); err != nil {
+		t.Fatalf("Observe new_domain trigger: %v", err)
+	}
+
+	reads := filterType(sk.events, schema.EventTypeAlertSensitiveRead)
+	if len(reads) != 1 {
+		t.Fatalf("got %d alert.sensitive_read events, want 1 (no escalation outside the window)", len(reads))
+	}
+}
+
+func TestTrifecta_ExactlyAtWindowBoundaryEscalates(t *testing.T) {
+	// Boundary semantics: "within window" is inclusive of the exact edge.
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 0, 0, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe sensitive_read: %v", err)
+	}
+	clk.Advance(30 * time.Second) // exactly at the window edge
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 1, 42, daddr), 0); err != nil {
+		t.Fatalf("Observe new_domain trigger: %v", err)
+	}
+
+	reads := filterType(sk.events, schema.EventTypeAlertSensitiveRead)
+	if len(reads) != 2 {
+		t.Fatalf("got %d alert.sensitive_read events, want 2 (exactly-at-boundary must still escalate)", len(reads))
+	}
+}
+
+func TestTrifecta_DifferentSessionsDoNotCorrelate(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	if err := eng.Observe(sensitiveReadEvent("sess-A", 0, 0, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe sensitive_read: %v", err)
+	}
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-B", 0, 0, 42, daddr), 0); err != nil {
+		t.Fatalf("Observe new_domain trigger: %v", err)
+	}
+
+	reads := filterType(sk.events, schema.EventTypeAlertSensitiveRead)
+	if len(reads) != 1 {
+		t.Fatalf("got %d alert.sensitive_read events, want 1 (different sessions must not correlate)", len(reads))
+	}
+}
+
+func TestTrifecta_OnlySensitiveReadNoNewDomainNoEscalation(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 0, 0, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	reads := filterType(sk.events, schema.EventTypeAlertSensitiveRead)
+	if len(reads) != 1 {
+		t.Fatalf("got %d alert.sensitive_read events, want 1 (no new_domain observed, no escalation)", len(reads))
+	}
+}
+
+func TestTrifecta_EachNewDomainEscalatesOnlyOnce(t *testing.T) {
+	// A single sensitive_read paired with two distinct new_domain firings
+	// within the window escalates once per distinct correlation, not
+	// unboundedly — each (sensitive_read, new_domain) pairing is a distinct,
+	// independently newsworthy correlation, but the same new_domain must not
+	// re-trigger escalation repeatedly for the same already-correlated pair.
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 0, 0, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe sensitive_read: %v", err)
+	}
+	daddr1 := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 1, 42, daddr1), 0); err != nil {
+		t.Fatalf("Observe new_domain 1: %v", err)
+	}
+	daddr2 := mustParseV4Mapped(t, "1.2.3.4")
+	if err := eng.Observe(connectEvent("sess-1", 0, 2, 42, daddr2), 0); err != nil {
+		t.Fatalf("Observe new_domain 2: %v", err)
+	}
+
+	reads := filterType(sk.events, schema.EventTypeAlertSensitiveRead)
+	// original + escalation-for-daddr1 + escalation-for-daddr2 = 3
+	if len(reads) != 3 {
+		t.Fatalf("got %d alert.sensitive_read events, want 3 (original + one escalation per distinct new_domain)", len(reads))
+	}
+}
+
+func TestTrifecta_CrossSideCorrelationDoesNotCorruptOppositeList(t *testing.T) {
+	// Regression test (white-box, package-internal): correlateTrifecta's
+	// cross-correlation loops (iterating the *other* side's retained list
+	// to find candidates) must use a non-destructive filter
+	// (inWindowTrifecta), not pruneTrifecta. pruneTrifecta reuses its
+	// input slice's backing array (evs[:0]) to compact in place; calling
+	// it and discarding the result still leaves the caller's stored slice
+	// (never reassigned) pointing at a silently corrupted backing array —
+	// evicted entries get overwritten with duplicates of the surviving
+	// tail entries, even though the map's slice header (length) is
+	// unchanged.
+	//
+	// This corruption does NOT reliably surface as a wrong escalation
+	// *count* (emitTrifectaEscalation's own (readIdx, domainIdx) dedup
+	// absorbs a duplicate iteration, since a phantom duplicate carries the
+	// same idx as its original) — so this test inspects Engine's retained
+	// state directly rather than relying on emitted-alert counts, which
+	// would not have caught this defect.
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	window := 5 * time.Second
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(window))
+
+	// domain0 at t=0 (will be evicted), domain1 and domain2 at t=4
+	// (survive) — three entries so an eviction forces the in-place
+	// compaction to shift surviving elements down a slot (with only one
+	// surviving entry, compaction is a same-slot no-op and the bug is
+	// invisible).
+	daddr0 := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 0, 0, 42, daddr0), 0); err != nil {
+		t.Fatalf("Observe domain0: %v", err)
+	}
+	clk.Advance(4 * time.Second) // t=4
+	daddr1 := mustParseV4Mapped(t, "1.2.3.4")
+	if err := eng.Observe(connectEvent("sess-1", 0, 1, 42, daddr1), 0); err != nil {
+		t.Fatalf("Observe domain1: %v", err)
+	}
+	daddr2 := mustParseV4Mapped(t, "5.6.7.8")
+	if err := eng.Observe(connectEvent("sess-1", 0, 2, 42, daddr2), 0); err != nil {
+		t.Fatalf("Observe domain2: %v", err)
+	}
+
+	// A sensitive_read at t=5.5s: cutoff=0.5s evicts domain0 (t=0), keeps
+	// domain1/domain2 (t=4). This call's cross-correlation loop over
+	// recentNewDomains (iterate-only, no writeback owned here) is exactly
+	// the discard-after-prune site under test: it must not mutate
+	// e.recentNewDomains["sess-1"]'s backing array.
+	clk.Advance(1500 * time.Millisecond) // t=5.5
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 0, 3, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 0); err != nil {
+		t.Fatalf("Observe read1: %v", err)
+	}
+
+	stored := eng.recentNewDomains["sess-1"]
+	if len(stored) != 3 {
+		t.Fatalf("len(recentNewDomains[sess-1]) = %d, want 3 (the map's own writeback only happens when a new_domain fires, not when a sensitive_read merely reads it)", len(stored))
+	}
+	// stored[0] must still be domain0's original entry (host
+	// 93.184.216.34, idx 0) — the discarded correlate-only prune call must
+	// not have overwritten it with a duplicate of a later surviving entry.
+	if got := string(stored[0].host); got != "93.184.216.34" {
+		t.Errorf("recentNewDomains[sess-1][0].host corrupted: got %q, want %q (a live cross-correlation read overwrote an entry it does not own)", got, "93.184.216.34")
+	}
+	if stored[0].idx != 0 {
+		t.Errorf("recentNewDomains[sess-1][0].idx corrupted: got %d, want 0", stored[0].idx)
+	}
+	if got := string(stored[1].host); got != "1.2.3.4" {
+		t.Errorf("recentNewDomains[sess-1][1].host corrupted: got %q, want %q", got, "1.2.3.4")
+	}
+	if got := string(stored[2].host); got != "5.6.7.8" {
+		t.Errorf("recentNewDomains[sess-1][2].host corrupted: got %q, want %q", got, "5.6.7.8")
+	}
+}
+
+func TestTrifecta_EscalatedEventIsWellFormed(t *testing.T) {
+	clk := newFakeClock()
+	sk := &sink{}
+	fn := &FakeNotifier{}
+	eng := newTestEngine(t, clk, sk, fn, WithTrifectaWindow(30*time.Second))
+
+	if err := eng.Observe(sensitiveReadEvent("sess-1", 2, 0, 42, "/home/user/.ssh/id_ed25519", "ssh-key"), 2); err != nil {
+		t.Fatalf("Observe sensitive_read: %v", err)
+	}
+	daddr := mustParseV4Mapped(t, "93.184.216.34")
+	if err := eng.Observe(connectEvent("sess-1", 2, 1, 42, daddr), 2); err != nil {
+		t.Fatalf("Observe new_domain trigger: %v", err)
+	}
+
+	for _, ev := range sk.events {
+		if err := schema.Validate(ev); err != nil {
+			t.Errorf("event failed schema.Validate: %v (event: %+v)", err, ev)
+		}
 	}
 }
 

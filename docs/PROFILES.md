@@ -1,6 +1,6 @@
 # Profiles — Authoring Guide
 
-Profiles are RanA's opinion layer: everything else is mechanism. A profile is a TOML pack that tells RanA how to *recognize* an agent, what to *digest*, which extra paths are *sensitive*, how to *enrich* causality, and how the timeline should *read*. Shipped packs: `generic`, `claude-code`, `codex`, `openclaw` (`profiles/`).
+Profiles are RanA's opinion layer: everything else is mechanism. A profile is a TOML pack that tells RanA how to *recognize* an agent, what to *digest*, which extra paths are *sensitive*, how to *enrich* causality, and how the timeline should *read*. Shipped packs: `generic`, `claude-code`, `codex`, `openclaw`, `aider`, `cursor`, `generic-ci` (`profiles/`).
 
 The hard rule before any syntax: **profiles can only make RanA stricter or richer, never blinder.** They may *add* sensitive paths, *add* redaction patterns, *tighten* entropy thresholds, and *scope* digests. They cannot remove built-ins, loosen redaction, or disable capture classes below the D7 baseline. A profile that tries is rejected at load with a named error.
 

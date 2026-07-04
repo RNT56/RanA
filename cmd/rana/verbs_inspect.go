@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/RNT56/RanA/internal/ledger"
+	"github.com/RNT56/RanA/internal/report"
 	"github.com/RNT56/RanA/internal/schema"
 	"github.com/RNT56/RanA/internal/service"
 )
@@ -47,12 +48,16 @@ func cmdPs(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// cmdShow prints a session's events in order.
+// cmdShow prints a session's events in order. With --diff, it additionally
+// runs internal/report.DigestDiff against every fs.settle event and prints
+// whether the recorded revision is still available on local disk — never
+// file content (report.DigestDiff's own guarantee).
 func cmdShow(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("show", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dataDir := fs.String("data", defaultDataDir(), "RanA data directory")
 	limit := fs.Int("limit", 0, "max events to print (0 = all)")
+	diff := fs.Bool("diff", false, "for each fs.settle event, report on-disk digest availability (never content)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -67,6 +72,7 @@ func cmdShow(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "rana show: %v\n", err)
 		return exitUsage
 	}
+	defer ds.Close()
 	events, err := ds.Events(context.Background(), sessionID, 0, *limit)
 	if err != nil {
 		fmt.Fprintf(stderr, "rana show: %v\n", err)
@@ -78,8 +84,29 @@ func cmdShow(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, ev := range events {
 		printEvent(stdout, ev)
+		if *diff && ev.Type == schema.EventTypeFsSettle {
+			printDigestDiff(stdout, ev)
+		}
 	}
 	return exitOK
+}
+
+// printDigestDiff renders one fs.settle event's report.DigestDiff outcome
+// as an indented follow-up line under the event it belongs to. It never
+// prints file content — only the availability Note, and the recorded
+// digests as hex, matching report.DigestDiffResult's own guarantee.
+func printDigestDiff(w io.Writer, ev schema.Event) {
+	res, err := report.DigestDiff(identityPathTranslator{}, ev)
+	if err != nil {
+		fmt.Fprintf(w, "    diff: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "    diff: %s\n", res.Note)
+	fmt.Fprintf(w, "      path:       %s\n", res.Path)
+	fmt.Fprintf(w, "      new_digest: %s\n", res.NewDigest)
+	if res.PrevDigest != "" {
+		fmt.Fprintf(w, "      prev_digest: %s\n", res.PrevDigest)
+	}
 }
 
 // printEvent renders one event as a compact line. It prints only already-

@@ -77,6 +77,11 @@ type Enricher struct {
 
 	cgidToSession map[uint64]string
 	nextIdx       map[string]uint64
+
+	// exeProvenance is the per-session exe-provenance seen-map (Tier-2
+	// exe_first_seen/exe_changed/exe_known), keyed by session id per
+	// CONTRACTS ("keep an in-enricher seen-map keyed by session").
+	exeProvenance map[string]*exeSeen
 }
 
 // NewEnricher constructs an Enricher from cfg.
@@ -153,6 +158,18 @@ func (e *Enricher) EnrichExec(rec ExecRecord, seg uint64) (schema.Event, error) 
 
 	ev := schema.NewProcExec(session, seg, idx, rec.TsMono, rec.TsWall, rec.Pid,
 		argv, comm, cwd, exePath, rec.Ppid, rec.Uid)
+
+	// Exe-provenance (Tier-2, additive, P1-safe): only runs when the
+	// caller supplied a digest (ExeDigestSet) — an unset digest leaves
+	// proc.exec exactly as it was before this feature existed.
+	if rec.ExeDigestSet {
+		seen := e.exeSeenFor(session)
+		firstSeen, changed := seen.observe(rec.ExePath, rec.ExeDigest)
+		ev.Data["exe_first_seen"] = firstSeen
+		ev.Data["exe_changed"] = changed
+		ev.Data["exe_known"] = e.pipeline.Redact(ClassifyExePath(rec.ExePath))
+	}
+
 	return ev, nil
 }
 

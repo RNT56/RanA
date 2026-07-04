@@ -156,3 +156,59 @@ func TestFullyConsistentForgeryCaughtOnlyByMirror(t *testing.T) {
 		t.Fatalf("test bug: forged chain head coincidentally equals the original")
 	}
 }
+
+// TestVerifyMirrorMissingHeadsLogIsIncompleteNotOK pins the P5/P10 honesty
+// fix: when --mirror is explicitly requested but the heads.log is absent or
+// empty, Verify must NOT report a clean OK (which would be indistinguishable
+// from "mirror checked, clean"). It reports INCOMPLETE (code 3) with a
+// mirror_uncheckable note, so a user can always tell "checked" from "not
+// checked."
+func TestVerifyMirrorMissingHeadsLogIsIncompleteNotOK(t *testing.T) {
+	root := t.TempDir()
+	d := ledger.Dir(root)
+	if err := d.Ensure(); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	key, err := chain.GenerateKey(root)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	// Build a normal, clean ledger WITH a checkpoint — but do NOT mirror any
+	// heads (no OnHeadReport wired), so the heads.log will be absent.
+	w, err := ledger.NewWriter(d, ledger.WriterOptions{
+		SegSealMaxEvents: 4, CheckpointMaxSegs: 1, Key: key,
+	})
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	session := schema.NewSessionID(fixedClock{ms: 7100})
+	writeExecs(t, w, session, 4)
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Plain verify (no mirror) is a clean OK — the ledger itself is fine.
+	if res, err := ledger.Verify(d, ledger.VerifyOptions{}); err != nil || res.Code != ledger.CodeOK {
+		t.Fatalf("plain Verify: res=%+v err=%v", res, err)
+	}
+
+	// --mirror against a heads.log that does not exist must be INCOMPLETE,
+	// never a silent OK.
+	missing := filepath.Join(t.TempDir(), "does-not-exist-heads.log")
+	res, err := ledger.Verify(d, ledger.VerifyOptions{Mirror: true, HeadsLogPath: missing})
+	if err != nil {
+		t.Fatalf("Verify --mirror: %v", err)
+	}
+	if res.Code != ledger.CodeIncomplete {
+		t.Fatalf("Verify --mirror with missing heads.log: Code = %d, want CodeIncomplete (3)", res.Code)
+	}
+	var found bool
+	for _, f := range res.IncompleteNotes {
+		if f.Kind == ledger.FindingMirrorUncheckable {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a %q incomplete note, got %+v", ledger.FindingMirrorUncheckable, res.IncompleteNotes)
+	}
+}

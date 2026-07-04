@@ -26,9 +26,12 @@ import (
 //go:embed embedded/*.toml
 var embeddedPacks embed.FS
 
-// shippedPackNames lists the 4 v1 packs (docs/PROFILES.md, plan D17), in
+// shippedPackNames lists the shipped Tier-1 (plan D17) and Tier-2 packs, in
 // the order Available() returns them.
-var shippedPackNames = []string{"generic", "claude-code", "codex", "openclaw"}
+var shippedPackNames = []string{
+	"generic", "claude-code", "codex", "openclaw",
+	"aider", "cursor", "generic-ci",
+}
 
 // Load loads and validates a shipped profile pack by name (one of
 // Available()). Load never touches the filesystem beyond the embedded FS.

@@ -78,6 +78,16 @@ type Features struct {
 	// Tcx is available from TierPreferred (>=6.6): tightens io_uring
 	// network coverage.
 	Tcx bool
+	// LSMSocketConnect is available from TierEnhanced (>=5.18): attaches
+	// rana_socket_connect (bpf/src/rana_net.c), an lsm/socket_connect
+	// hook that closes the io_uring IORING_OP_CONNECT escape documented
+	// in LIMITS.md's "io_uring socket ops" row — BPF LSM program
+	// attachment is a well-supported, stable mechanism from this tier up
+	// (docs/ARCHITECTURE.md §7). Coverage, not a v1-completeness
+	// requirement (D5): baseline's cgroup/connect4·6 already catches the
+	// overwhelming majority of connects; this closes the one documented
+	// gap on kernels that support it.
+	LSMSocketConnect bool
 }
 
 // Features returns the capability set unlocked at tier t. TierUnsupported
@@ -94,6 +104,7 @@ func (t Tier) Features() Features {
 	}
 	if t >= TierEnhanced {
 		f.KprobeMulti = true
+		f.LSMSocketConnect = true
 	}
 	if t >= TierPreferred {
 		f.Tcx = true
@@ -287,6 +298,52 @@ func ReattachPlan(pinned, wanted []string) ReattachResult {
 		}
 	}
 	return result
+}
+
+// baselineProgramNames are the complete v1 hook set (D5: "the product is
+// complete at Baseline; higher tiers are efficiency and coverage, not
+// features"), wanted at every supported tier (Baseline/Enhanced/
+// Preferred). Names match the SEC() function symbol bpf2go generates a Go
+// accessor for in bpf/src/*.c — these are the names the linux-gated
+// loader passes to ReattachPlan and pins under PinPath("prog", name).
+//
+// rana_path_link (bpf/src/rana_fs.c, fentry/security_path_link) is part
+// of this baseline set, not gated to a higher tier: it closes the
+// hardlink-into-watchlist dodge (LIMITS.md) using only a plain fentry
+// attach, which has been available since the 5.15 floor — there is no
+// coverage reason to withhold it below Enhanced/Preferred.
+var baselineProgramNames = []string{
+	"rana_on_exec", "rana_on_fork", "rana_on_exit",
+	"rana_connect4", "rana_connect6", "rana_sendmsg4", "rana_sendmsg6",
+	"rana_unix_connect", "rana_flow_close",
+	"rana_file_open", "rana_path_unlink", "rana_path_rename", "rana_path_mkdir",
+	"rana_vfs_truncate", "rana_path_link",
+	"rana_dns_egress",
+	"rana_cgroup_attach_task",
+}
+
+// WantedPrograms returns the BPF program names the loader should attach
+// at the given tier: the complete baseline hook set at every supported
+// tier, plus rana_socket_connect (the io_uring-closing LSM hook,
+// bpf/src/rana_net.c) once Features().LSMSocketConnect unlocks at
+// TierEnhanced+. Returns an empty slice for TierUnsupported — nothing
+// attaches on a kernel below RanA's floor (ranad refuses to start).
+//
+// This is the portable half of "what should be attached"; the linux-gated
+// loader (loader.go/loader_attach.go) is responsible for actually loading
+// and pinning the bpf2go-generated program with each of these names and
+// for feeding the result, plus whatever is currently pinned, into
+// ReattachPlan.
+func WantedPrograms(tier Tier) []string {
+	if tier < TierBaseline {
+		return nil
+	}
+	names := make([]string, len(baselineProgramNames))
+	copy(names, baselineProgramNames)
+	if tier.Features().LSMSocketConnect {
+		names = append(names, "rana_socket_connect")
+	}
+	return names
 }
 
 // GapReasonDaemonRestart mirrors schema.GapReasonDaemonRestart — re-typed

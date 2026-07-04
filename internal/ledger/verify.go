@@ -17,19 +17,20 @@ type FindingKind string
 // FindingKind constants — one per docs/TRUST.md §6 check, plus the
 // completeness/gap-honesty kinds `test/chain-mutations` exercises.
 const (
-	FindingNonCanonical     FindingKind = "non_canonical_encoding"
-	FindingLeafMismatch     FindingKind = "leaf_mismatch"
-	FindingMerkleMismatch   FindingKind = "merkle_mismatch"
-	FindingChainLinkBroken  FindingKind = "chain_link_broken"
-	FindingSignatureInvalid FindingKind = "signature_invalid"
-	FindingCkptChainBroken  FindingKind = "checkpoint_chain_broken"
-	FindingCkptHeadMismatch FindingKind = "checkpoint_head_mismatch"
-	FindingRowContinuity    FindingKind = "row_continuity_broken"
-	FindingGapDishonest     FindingKind = "gap_dishonest"
-	FindingMirrorMismatch   FindingKind = "mirror_mismatch"
-	FindingArchiveMissing   FindingKind = "archive_missing"
-	FindingSessionMissing   FindingKind = "session_deleted"
-	FindingPubkeyUnresolved FindingKind = "pubkey_unresolved"
+	FindingNonCanonical      FindingKind = "non_canonical_encoding"
+	FindingLeafMismatch      FindingKind = "leaf_mismatch"
+	FindingMerkleMismatch    FindingKind = "merkle_mismatch"
+	FindingChainLinkBroken   FindingKind = "chain_link_broken"
+	FindingSignatureInvalid  FindingKind = "signature_invalid"
+	FindingCkptChainBroken   FindingKind = "checkpoint_chain_broken"
+	FindingCkptHeadMismatch  FindingKind = "checkpoint_head_mismatch"
+	FindingRowContinuity     FindingKind = "row_continuity_broken"
+	FindingGapDishonest      FindingKind = "gap_dishonest"
+	FindingMirrorMismatch    FindingKind = "mirror_mismatch"
+	FindingMirrorUncheckable FindingKind = "mirror_uncheckable"
+	FindingArchiveMissing    FindingKind = "archive_missing"
+	FindingSessionMissing    FindingKind = "session_deleted"
+	FindingPubkeyUnresolved  FindingKind = "pubkey_unresolved"
 )
 
 // Finding is one concrete, precisely-categorized defect (or incompleteness
@@ -150,11 +151,15 @@ func Verify(dir Datadir, opts VerifyOptions) (Result, error) {
 	}
 
 	if opts.Mirror {
-		findings, err := verifyMirror(db, opts.HeadsLogPath)
+		findings, incNotes, err := verifyMirror(db, opts.HeadsLogPath)
 		if err != nil {
 			return Result{}, err
 		}
 		res.Findings = append(res.Findings, findings...)
+		if len(incNotes) > 0 {
+			res.IncompleteNotes = append(res.IncompleteNotes, incNotes...)
+			incomplete = true
+		}
 	}
 
 	switch {
@@ -450,10 +455,10 @@ func verifyLedgerWideCheckpointChain(db *sql.DB) ([]Finding, error) {
 // mirrored HeadReport is reported as a possible post-mirror rewrite —
 // this is the ONLY check in the suite that can catch a rewrite-and-
 // re-sign performed with the legitimately-stolen device key.
-func verifyMirror(db *sql.DB, headsPath string) ([]Finding, error) {
+func verifyMirror(db *sql.DB, headsPath string) (findings []Finding, incompleteNotes []Finding, err error) {
 	heads, err := chain.ReadHeads(headsPath)
 	if err != nil {
-		return nil, fmt.Errorf("ledger: reading heads mirror: %w", err)
+		return nil, nil, fmt.Errorf("ledger: reading heads mirror: %w", err)
 	}
 	mirrored := make(map[string]chain.HeadReport, len(heads))
 	for _, h := range heads {
@@ -462,17 +467,18 @@ func verifyMirror(db *sql.DB, headsPath string) ([]Finding, error) {
 
 	rows, err := db.Query(`SELECT session, seg_last, chain_head, body FROM checkpoints ORDER BY cid ASC`)
 	if err != nil {
-		return nil, fmt.Errorf("ledger: querying checkpoints for mirror check: %w", err)
+		return nil, nil, fmt.Errorf("ledger: querying checkpoints for mirror check: %w", err)
 	}
 	defer rows.Close()
 
-	var findings []Finding
+	var checkpointCount, matchedCount int
 	for rows.Next() {
+		checkpointCount++
 		var session string
 		var segLast uint64
 		var chainHeadBytes, body []byte
 		if err := rows.Scan(&session, &segLast, &chainHeadBytes, &body); err != nil {
-			return nil, fmt.Errorf("ledger: scanning checkpoint for mirror check: %w", err)
+			return nil, nil, fmt.Errorf("ledger: scanning checkpoint for mirror check: %w", err)
 		}
 		h, ok := mirrored[mirrorKey(session, segLast)]
 		if !ok {
@@ -482,6 +488,7 @@ func verifyMirror(db *sql.DB, headsPath string) ([]Finding, error) {
 			// below when a mirrored entry exists and disagrees.
 			continue
 		}
+		matchedCount++
 		var chainHead [32]byte
 		copy(chainHead[:], chainHeadBytes)
 		ckptHash := chain.CheckpointHash(body)
@@ -490,7 +497,21 @@ func verifyMirror(db *sql.DB, headsPath string) ([]Finding, error) {
 				Detail: "checkpoint does not match the root-owned heads mirror recorded before any compromise"})
 		}
 	}
-	return findings, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	// P5/P10 honesty: --mirror was explicitly requested, but if not a single
+	// checkpoint could be cross-checked against a mirrored head (the mirror at
+	// headsPath is absent or empty), the check did not actually run. Reporting
+	// OK here would let a user conflate "mirror checked, clean" with "mirror
+	// never ran" — exactly the ambiguity a security tool must not have. Surface
+	// it as INCOMPLETE (code 3), never a silent success.
+	if checkpointCount > 0 && matchedCount == 0 {
+		incompleteNotes = append(incompleteNotes, Finding{Kind: FindingMirrorUncheckable,
+			Detail: fmt.Sprintf("mirror cross-check requested but no checkpoint matched any entry in the heads mirror at %s (absent or empty); the check could not be performed", headsPath)})
+	}
+	return findings, incompleteNotes, nil
 }
 
 func mirrorKey(session string, segLast uint64) string {

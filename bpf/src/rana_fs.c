@@ -253,3 +253,75 @@ int BPF_PROG(rana_vfs_truncate, struct path *p, long length)
 			dentry, NULL);
 	return 0;
 }
+
+/*
+ * fentry security_path_link (linkat(2)/link(2) creating a new hardlink):
+ * closes the documented hardlink dodge (LIMITS.md "Hardlinks into the
+ * sensitive watchlist" row) for links created DURING a recorded session.
+ *
+ * A hardlink shares its target's (dev,inode) — rana_sensitive_inodes
+ * already defeats a hardlink to a file that was PINNED AT SESSION START
+ * (D7/D9). The gap is a file that only matches a *prefix* rule (e.g.
+ * "~/.ssh") rather than being individually pinned by inode: if a session
+ * process hardlinks that file to a path outside the watched prefix, a
+ * later open under the new alias path won't match the prefix string, and
+ * — until now — the target inode wasn't in rana_sensitive_inodes either
+ * (only pre-existing-at-start files got pinned), so the aliased read was
+ * invisible to fs.sensitive_read matching.
+ *
+ * Fix: on every hardlink creation, resolve the EXISTING (old) dentry's
+ * path and check it against the sensitive-prefix map exactly like
+ * security_file_open does; if it matches, pin the underlying inode's
+ * (dev,ino) into rana_sensitive_inodes right now (re-pin), so ANY future
+ * open — including through the brand-new alias path — is caught by the
+ * inode-identity check regardless of which name it's opened under. This
+ * is a map write, not a ringbuf event by itself (no new record kind is
+ * introduced — the fs.rename/fs.write_open-shaped record already carries
+ * the create-a-hardlink fact if/when a future dedicated fs.link op is
+ * added; today the point of this hook is purely the defensive re-pin, so
+ * a compromised agent cannot outrun the watchlist by hardlinking a
+ * prefix-matched sensitive file to a fresh, unwatched path before reading
+ * it under the new name).
+ *
+ * P2: fentry cannot alter security_path_link's return value or block the
+ * link — purely observational bookkeeping into a map RanA itself owns.
+ */
+SEC("fentry/security_path_link")
+int BPF_PROG(rana_path_link, struct dentry *old_dentry, struct path *new_dir,
+	     struct dentry *new_dentry)
+{
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task_btf();
+	__u64 cgid = rana_task_cgid(task);
+	if (!rana_cgid_in_session(cgid))
+		return 0;
+
+	__u8 path_buf[RANA_CAP_FSOP_PATH];
+	__builtin_memset(path_buf, 0, sizeof(path_buf));
+	int path_len = rana_resolve_path(old_dentry, path_buf, sizeof(path_buf));
+
+	__u32 rule = rana_match_sensitive_prefix(path_buf, path_len);
+	if (!rule) {
+		/* Already-pinned-by-inode files need no re-pin (they're caught
+		 * regardless of alias path already); only a prefix-only match
+		 * needs the defensive re-pin below. */
+		return 0;
+	}
+
+	struct inode *inode = BPF_CORE_READ(old_dentry, d_inode);
+	if (!inode)
+		return 0;
+
+	struct rana_dev_inode_key key = {};
+	key.ino = BPF_CORE_READ(inode, i_ino);
+	struct super_block *sb = BPF_CORE_READ(inode, i_sb);
+	if (sb)
+		key.dev = BPF_CORE_READ(sb, s_dev);
+
+	/* Re-pin: from this point on, ANY path resolving to this (dev,ino) —
+	 * old name or the brand-new hardlinked alias — matches
+	 * rana_match_sensitive_inode in security_file_open, independent of
+	 * the alias's own path string. BPF_ANY: fine to overwrite an existing
+	 * pin with the same rule id (idempotent). */
+	bpf_map_update_elem(&rana_sensitive_inodes, &key, &rule, BPF_ANY);
+	return 0;
+}

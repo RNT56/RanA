@@ -1,0 +1,43 @@
+# RanA profile: cursor
+# Cursor's headless/CLI agent (cursor-agent / cursor-cli) — a repo-scoped
+# coding agent invoked from a terminal, distinct from the Cursor GUI editor.
+
+[profile]
+name        = "cursor"
+description = "cursor-agent CLI — repo-scoped coding agent."
+version     = 1
+
+[match]
+auto = true
+exe_basename = ["cursor-agent", "cursor-cli", "cursor"]
+argv_contains = ["cursor-agent"]
+
+[capture]
+exec            = true
+fork_exit       = true
+file_write      = true
+file_meta_ops   = true
+network_connect = true
+network_flow    = true
+unix_sockets    = true
+
+[digest]
+scopes = ["$SESSION_CWD/**"]
+exclude = ["**/.git/objects/**", "**/node_modules/**", "**/target/**", "**/.venv/**"]
+
+[sensitive_read]
+extra = [
+  "~/.config/cursor-agent/**",  # cursor-agent's own config/credential store
+  "~/.cursor/**",               # Cursor's shared config dir (may hold auth tokens)
+  "~/.config/gh/**",
+  "~/.npmrc",
+]
+
+[markers]
+enabled = false          # no first-party marker channel; causality via process tree + time
+
+[timeline]
+lens = "tree"
+
+[retention]
+ttl_days = 30

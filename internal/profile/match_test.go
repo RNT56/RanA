@@ -5,7 +5,7 @@ import "testing"
 func loadAll(t *testing.T) []*Profile {
 	t.Helper()
 	var out []*Profile
-	for _, n := range []string{"generic", "claude-code", "codex", "openclaw"} {
+	for _, n := range []string{"generic", "claude-code", "codex", "openclaw", "aider", "cursor", "generic-ci"} {
 		p, err := Load(n)
 		if err != nil {
 			t.Fatalf("Load(%q): %v", n, err)
@@ -13,6 +13,38 @@ func loadAll(t *testing.T) []*Profile {
 		out = append(out, p)
 	}
 	return out
+}
+
+func TestMatch_Aider(t *testing.T) {
+	packs := loadAll(t)
+	got := Match(packs, "/usr/local/bin/aider", []string{"aider", "--yes"})
+	if got == nil || got.Name != "aider" {
+		t.Fatalf("Match = %v, want aider", got)
+	}
+}
+
+func TestMatch_CursorAgent(t *testing.T) {
+	packs := loadAll(t)
+	got := Match(packs, "/usr/local/bin/cursor-agent", []string{"cursor-agent"})
+	if got == nil || got.Name != "cursor" {
+		t.Fatalf("Match = %v, want cursor", got)
+	}
+}
+
+func TestMatch_GenericCI_ArgvMarker(t *testing.T) {
+	packs := loadAll(t)
+	got := Match(packs, "/usr/local/bin/myagent", []string{"myagent", "--ci", "run"})
+	if got == nil || got.Name != "generic-ci" {
+		t.Fatalf("Match = %v, want generic-ci", got)
+	}
+}
+
+func TestMatch_GenericCI_NonInteractiveMarker(t *testing.T) {
+	packs := loadAll(t)
+	got := Match(packs, "/usr/local/bin/myagent", []string{"myagent", "--non-interactive"})
+	if got == nil || got.Name != "generic-ci" {
+		t.Fatalf("Match = %v, want generic-ci", got)
+	}
 }
 
 func TestMatch_ExeBasename(t *testing.T) {

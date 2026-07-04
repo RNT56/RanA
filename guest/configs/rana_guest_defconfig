@@ -35,7 +35,7 @@ BR2_TARGET_GENERIC_ISSUE="RanA guest (base layer)"
 # runs the "baseline+" tier). Keep it a specific version for reproducibility.
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
-BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6.52"
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6.58"
 BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
 # Merge RanA's required options (BTF, virtiofs, overlayfs, cgroup2, vsock,
 # tracepoints/fentry/BPF) on top of the arch default.

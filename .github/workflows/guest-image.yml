@@ -40,7 +40,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential git wget cpio unzip rsync bc file \
-            libncurses-dev python3 gawk gpg
+            libncurses-dev python3 gawk gpg \
+            libelf-dev libacl1-dev libssl-dev pkg-config flex bison
 
       # Cache the Buildroot download dir and per-build output so warm runs skip
       # re-downloading packages and rebuilding the toolchain. Keyed on the

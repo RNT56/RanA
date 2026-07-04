@@ -2,7 +2,9 @@ package ledger
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,21 @@ import (
 	"github.com/RNT56/RanA/internal/redact"
 	"github.com/RNT56/RanA/internal/schema"
 )
+
+// g1FloorEvPS is the sustained-throughput floor gate G1 enforces. The
+// laptop-class bar is 10,000 ev/s (CLAUDE.md §4). CI hardware is slower and
+// noisier, so CI may relax the floor via RANA_G1_MIN_EVPS (see
+// .github/workflows/ci.yml) — but only the throughput floor is relaxable; the
+// zero-loss and p99-latency correctness gates below are never relaxed. A
+// missing or unparseable env var means the strict 10k floor applies.
+func g1FloorEvPS() float64 {
+	if v := os.Getenv("RANA_G1_MIN_EVPS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			return f
+		}
+	}
+	return 10_000
+}
 
 // BenchmarkWriterSustained is gate G1: it drives >= 1,000,000 synthetic,
 // mixed-type events through the REAL encode -> leaf -> seg -> group-commit
@@ -104,8 +121,9 @@ func BenchmarkWriterSustained(b *testing.B) {
 	fmt.Printf("  commit p99:        %s\n", p99)
 	fmt.Printf("  commit max:        %s\n", maxLat)
 
-	if throughput < 10_000 {
-		b.Errorf("G1 VIOLATION: throughput %.0f events/sec < 10,000 events/sec floor", throughput)
+	floor := g1FloorEvPS()
+	if throughput < floor {
+		b.Errorf("G1 VIOLATION: throughput %.0f events/sec < %.0f events/sec floor", throughput, floor)
 	}
 	if p99 >= 15*time.Millisecond {
 		b.Errorf("G1 VIOLATION: p99 commit latency %s >= 15ms", p99)

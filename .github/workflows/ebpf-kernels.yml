@@ -1,0 +1,102 @@
+# RanA multi-kernel eBPF harness (CLAUDE.md §5: "LTS kernels 5.15, 6.1, 6.6,
+# latest").
+#
+# RanA's load-bearing events come from eBPF CO-RE programs (P1). CO-RE means
+# "compile once, run everywhere" across kernel struct layouts — but that
+# promise has to be *proven*, not assumed. This workflow boots a real VM for
+# each LTS kernel (via cilium's little-vm-helper), loads the generated BPF
+# objects, and runs the harness so a CO-RE relocation that breaks on 6.1 but
+# works on 6.6 (or vice-versa) is caught.
+#
+# WHY IT IS MANUAL / NON-BLOCKING:
+#   * It needs a real kernel + root + BTF — infrastructure the pure-Go PR gate
+#     (ci.yml) deliberately does not require, and which the macOS dev host
+#     cannot run at all (LIMITS.md §8: real kernel capture is a CI concern).
+#   * It pulls prebuilt kernel images from an external registry, so it must not
+#     sit on the critical path of every PR.
+# It is therefore workflow_dispatch (run it on demand) + on pushes to main that
+# touch BPF code. It is NOT a required status check. When the eBPF objects and
+# the `bpf_harness`-tagged tests are validated green here on real kernels, this
+# can be promoted to a required gate and the compile-only check in ci.yml
+# becomes its fast-feedback front end.
+name: ebpf-kernels
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "bpf/**"
+      - "internal/bpf/**"
+      - "internal/collector/**"
+      - ".github/workflows/ebpf-kernels.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ebpf-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: eBPF harness (kernel ${{ matrix.kernel }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # LTS floor (5.15) through current, plus bpf-next for early warning.
+        kernel: ["5.15-main", "6.1-main", "6.6-main", "bpf-next-main"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install clang / llvm (BPF codegen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev
+
+      - name: generate CO-RE objects + compile the harness test binary
+        id: prep
+        run: |
+          set -euo pipefail
+          if [ ! -d ./internal/bpf ]; then
+            echo "internal/bpf not present — nothing to run."; echo "ran=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Produce the embedded CO-RE objects (no-op if there are no
+          # //go:generate directives yet).
+          go generate ./internal/bpf || echo "go generate produced no output"
+          # Compile (do NOT run) the root+kernel harness into a binary the VM
+          # can execute. If no test carries the bpf_harness build tag yet,
+          # `go test -c` writes no binary — we skip rather than fail.
+          if go test -c -tags bpf_harness -o ./bpf-harness.test ./internal/bpf 2>/tmp/build.log; then
+            if [ -f ./bpf-harness.test ]; then
+              echo "harness binary built"; echo "ran=1" >> "$GITHUB_OUTPUT"
+            else
+              echo "no bpf_harness-tagged tests — skipping VM run"; echo "ran=0" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "harness compile failed:"; cat /tmp/build.log; exit 1
+          fi
+
+      - name: boot ${{ matrix.kernel }} and run the harness as root
+        if: steps.prep.outputs.ran == '1'
+        uses: cilium/little-vm-helper@v0.0.30
+        with:
+          test-name: rana-ebpf-${{ matrix.kernel }}
+          image: complexity-test
+          image-version: ${{ matrix.kernel }}
+          host-mount: ./
+          install-dependencies: "true"
+          cmd: |
+            set -e
+            uname -a
+            mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
+            mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
+            cd /host
+            # RANA_BPF_TESTS gates the attach/harness tests inside the test
+            # binary so they only run where a real kernel is present (here).
+            RANA_BPF_TESTS=1 ./bpf-harness.test -test.v

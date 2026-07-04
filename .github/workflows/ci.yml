@@ -94,7 +94,7 @@ jobs:
           go build ./...
 
   # ---------------------------------------------------------------------------
-  # test — unit + harness tests on the LTS matrix.
+  # test — unit + harness tests across the OS/arch matrix.
   # ---------------------------------------------------------------------------
   test:
     name: test (${{ matrix.os }})
@@ -102,7 +102,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, macos-14]
+        # amd64 (22.04/24.04) + macOS + native arm64 (ubuntu-24.04-arm is a
+        # first-class GitHub-hosted runner). RanA ships linux/arm64 binaries,
+        # so arm64 is *run*, not merely cross-compiled (CLAUDE.md §5).
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, macos-14]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -113,12 +116,19 @@ jobs:
         run: go test ./...
 
   # ---------------------------------------------------------------------------
-  # race — the race detector on ubuntu-24.04 (CONTRACTS: `go test -race
-  # ./...` must pass). Race builds need CGO, so it is enabled here only.
+  # race — the race detector on both amd64 and native arm64 (CONTRACTS:
+  # `go test -race ./...` must pass). Race builds need CGO, so it is enabled
+  # here only. arm64 has a distinct memory model, so the trust core's
+  # concurrency guarantees (internal/redact determinism, internal/ledger
+  # single-writer) are proven on both.
   # ---------------------------------------------------------------------------
   race:
-    name: race (ubuntu-24.04)
-    runs-on: ubuntu-24.04
+    name: race (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -130,9 +140,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # gates — the CI-enforceable success gates (CLAUDE.md §4).
-  #   G1: writer sustains events/s. Relaxed to >=6000 on CI hardware via
-  #       RANA_G1_MIN_EVPS (the full 10k bar applies on laptop-class hardware
-  #       locally). The ledger bench reads this env threshold and fails below.
+  #   G1: writer sustains events/s. The ledger bench reads RANA_G1_MIN_EVPS
+  #       (internal/ledger.g1FloorEvPS) and fails below it; unset => the strict
+  #       10k laptop-class floor. CI relaxes ONLY this throughput floor to 6000
+  #       (slower/noisier hardware). The zero-loss and p99-latency correctness
+  #       gates in the same bench are never relaxed.
   #   G4: redaction corpus — >=99% recall, zero raw secret in any output.
   #   G5: chain-mutation suite — 100% of mutations detected.
   # G4 and G5 are strict on CI (correctness, not throughput).
@@ -336,3 +348,103 @@ jobs:
             fi
           done
           go build ./...
+
+  # ---------------------------------------------------------------------------
+  # govulncheck — a security tool must scan its own dependency graph against
+  # the Go vulnerability database. Unlike a naive `nancy`/`osv-scanner` over
+  # go.sum, govulncheck is call-graph-aware: it only flags a CVE if RanA
+  # actually reaches the vulnerable symbol, so a green result is meaningful,
+  # not noise. Offline-DB pulled from the official vuln service at CI time
+  # (this is a build-time check, not the tool phoning home — D24 governs the
+  # shipped binary, not CI).
+  # ---------------------------------------------------------------------------
+  govulncheck:
+    name: govulncheck (Go vuln DB)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: govulncheck ./...
+        run: govulncheck ./...
+
+  # ---------------------------------------------------------------------------
+  # reproducible-build — gate G8's "reproducible build verified on 2 machines".
+  # Two independent runner VMs build the same static Linux binaries with the
+  # same reproducible flags the release uses (-trimpath, -buildid=,
+  # CGO_ENABLED=0, SOURCE_DATE_EPOCH pinned); each publishes its SHA256SUMS.
+  # A third job diffs the two and FAILS on any mismatch — proving the build is
+  # bit-for-bit reproducible across machines, not just repeatable on one.
+  # ---------------------------------------------------------------------------
+  repro-build:
+    name: repro-build (machine ${{ matrix.machine }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two separate jobs => two separate runner VMs => two machines.
+        machine: [a, b]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # a warm build cache could mask a non-reproducible input
+      - name: build static linux binaries (reproducible flags)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+          SOURCE_DATE_EPOCH: "1"
+        run: |
+          mkdir -p dist
+          built=0
+          for cmd in rana ranad rana-verify-standalone; do
+            if [ -d "./cmd/$cmd" ]; then
+              built=1
+              go build -trimpath -ldflags="-s -w -buildid=" -o "dist/$cmd" "./cmd/$cmd"
+            fi
+          done
+          cd dist
+          if [ "$built" = 0 ]; then
+            echo "no cmd/ binaries present yet — writing empty SHA256SUMS"
+            : > SHA256SUMS
+          else
+            sha256sum * > SHA256SUMS
+          fi
+          cat SHA256SUMS
+      - name: upload this machine's checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-sums-${{ matrix.machine }}
+          path: dist/SHA256SUMS
+          if-no-files-found: error
+
+  repro-verify:
+    name: repro-verify (bit-for-bit across 2 machines)
+    needs: repro-build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: fetch machine A checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: repro-sums-a
+          path: a
+      - name: fetch machine B checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: repro-sums-b
+          path: b
+      - name: diff checksums (G8 — must be identical)
+        run: |
+          echo "== machine A =="; cat a/SHA256SUMS
+          echo "== machine B =="; cat b/SHA256SUMS
+          if ! diff -u a/SHA256SUMS b/SHA256SUMS; then
+            echo "G8 VIOLATION: build is not reproducible across machines (checksums differ)."
+            exit 1
+          fi
+          echo "G8 OK: static Linux binaries are bit-for-bit identical across two machines."

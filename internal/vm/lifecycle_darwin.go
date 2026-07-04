@@ -12,7 +12,7 @@ import (
 	vz "github.com/Code-Hex/vz/v3"
 )
 
-// Boot parameters fixed by docs/ARCHITECTURE.md §6.2 / plan D15 for every
+// Boot parameters fixed by docs/ARCHITECTURE.md §6.2 for every
 // RanA guest: minimal footprint, no graphics/audio/USB, one vsock device
 // for the control/event stream, one virtiofs device per granted host dir,
 // one virtio-block root disk (the layered base+runtime image), and one

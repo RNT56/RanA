@@ -1,6 +1,6 @@
 # Threat Model
 
-This expands `RANA-plan-v1.md §3`. It names the adversaries RanA is built against, the ones it explicitly is not, and the exact trust claims that survive contact with each. If a claim here is stronger than what the code delivers, that is a launch-blocking bug (`P4`, `P10`).
+This is the reference for RanA's threat model. It names the adversaries RanA is built against, the ones it explicitly is not, and the exact trust claims that survive contact with each. If a claim here is stronger than what the code delivers, that is a launch-blocking bug (`P4`, `P10`).
 
 ---
 
@@ -27,7 +27,7 @@ These are the claims most tempting to overstate, so they get their own section. 
 Can kill `ranad` or prevent it starting → *future* events suppressed. Detection: `gap{daemon_restart}` on resume, checkpoint-cadence break, `verify` boundary flag. Cannot silently rewrite sealed history (signatures + the root-owned head mirror).
 
 ### 3.2 Your own uid at recording time — which is what a subverted A1 *is*
-The recorded agent typically runs as the ledger owner. A fully-subverted agent can kill the user session service, **read the signing key**, and attempt a rewrite-and-re-sign of the user-owned ledger. RanA's answer (plan D27, `LIMITS.md §6.1`):
+The recorded agent typically runs as the ledger owner. A fully-subverted agent can kill the user session service, **read the signing key**, and attempt a rewrite-and-re-sign of the user-owned ledger. RanA's answer (the D27 custody guarantee, `LIMITS.md §6.1`):
 
 1. **Root-owned head mirror.** Every checkpoint head is reported to `ranad` and appended to `/var/lib/rana/heads.log` (root-owned, append-only). Heads mirrored before the compromise pin the past beyond a user-privileged attacker's reach; `rana verify --mirror` detects any rewrite, even one signed with the stolen key.
 2. **The recorder watches itself.** RanA's data directory (ledger, key, salt) is on the built-in sensitive watchlist — reading the key or opening the ledger for write is a recorded, alertable event until the moment capture is suppressed.
@@ -35,7 +35,7 @@ The recorded agent typically runs as the ledger owner. A fully-subverted agent c
 
 ## 4. RanA's own attack surface
 
-Expanded from plan §3.4:
+RanA's own attack surface and its mitigations:
 
 | Surface | Exposure | Mitigation |
 |---|---|---|

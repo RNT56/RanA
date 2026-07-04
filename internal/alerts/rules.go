@@ -17,7 +17,7 @@ import (
 // are deliberately independent namespaces within a session: a DNS lookup
 // for a domain and a later raw-IP connect to the address it resolved to
 // are two different observable facts (RanA cannot always prove they are
-// the same destination — DoH/DoT hides the qname entirely, plan §6.4) and
+// the same destination — DoH/DoT hides the qname entirely) and
 // each is independently the first time RanA has *seen this key*, so each
 // gets exactly one alert the first time it appears and never again.
 type newDomainRule struct {
@@ -202,8 +202,8 @@ func isCGNAT(ip net.IP) bool {
 // hand-picked, well-known, stable network operators chosen for narrating a
 // timeline ("first contact: 8.8.8.8 (Google Public DNS)") — this is
 // explicitly NOT an IP-reputation or geolocation database, has no update
-// mechanism, and never makes a network call to resolve or refresh (D24, plan
-// §2 scope walls: RanA does no phone-home, no third-party lookups).
+// mechanism, and never makes a network call to resolve or refresh (D24, the
+// scope walls: RanA does no phone-home, no third-party lookups).
 type asnPrefix struct {
 	network *net.IPNet
 	label   string
@@ -301,7 +301,7 @@ func (r *sensitiveReadRule) check(ev schema.Event) (firing, bool) {
 // alert.escape_precursor events. These are already fully-formed alert.*
 // events by the time Engine sees them post-persist (the escape detection
 // itself happens upstream, in the session/collector layer that has direct
-// access to the in-kernel session pid-map — plan §6.4, docs/ARCHITECTURE.md
+// access to the in-kernel session pid-map — docs/ARCHITECTURE.md
 // §4.2.3 — Engine has no independent way to detect an escape from the
 // event stream alone). The rule's only job is the best-effort desktop
 // notification; it MUST NOT synthesize a second alert event for a fact

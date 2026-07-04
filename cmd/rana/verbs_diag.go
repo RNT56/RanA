@@ -42,7 +42,7 @@ func cmdTimeline(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Bind 127.0.0.1 only (never 0.0.0.0) — the timeline is single-user,
-	// localhost, token-gated by construction (plan D19, §3.4).
+	// localhost, token-gated by construction (the D19 timeline UI).
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		fmt.Fprintf(stderr, "rana timeline: %v\n", err)

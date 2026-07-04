@@ -4,7 +4,7 @@ package session
 // spawned by `rana run`, an existing systemd unit slotted into the slice by
 // `rana adopt`, or a live process tree migrated by `rana adopt --pid N`.
 // Each non-trivial mode carries honest caveats about what the record does
-// and does not cover (P4, P10, plan §4.2.2).
+// and does not cover (P4, P10, the session/adopt lifecycle).
 type AdoptMode string
 
 // AdoptMode values.
@@ -14,12 +14,12 @@ const (
 	AdoptModeRun AdoptMode = "run"
 
 	// AdoptModeUnit is `rana adopt <unit>`: an existing systemd unit is
-	// slotted into rana.slice via a drop-in and restarted (plan §6.3).
+	// slotted into rana.slice via a drop-in and restarted (adopt).
 	AdoptModeUnit AdoptMode = "unit"
 
 	// AdoptModePID is `rana adopt --pid N`: a live, already-running
 	// process tree is migrated into the scope in place, without a
-	// restart (plan §4.2.2, RANA-plan-v1.md line 147).
+	// restart (the session/adopt lifecycle).
 	AdoptModePID AdoptMode = "pid"
 )
 

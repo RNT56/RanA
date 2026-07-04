@@ -1,7 +1,7 @@
 package profile
 
-// builtinSensitivePaths is the D9 in-kernel sensitive-read watchlist base
-// (RANA-plan-v1.md D9): credential directories whose read is the highest-
+// builtinSensitivePaths is the D9 in-kernel sensitive-read watchlist base:
+// credential directories whose read is the highest-
 // signal event class RanA records. Profiles may only ADD to this list
 // ([sensitive_read].extra); nothing here is ever removable by a profile.
 var builtinSensitivePaths = []string{
@@ -22,9 +22,9 @@ var builtinSensitivePaths = []string{
 
 // BuiltinSensitivePaths returns the built-in sensitive-read watchlist (D9),
 // plus, when datadir is non-empty, RanA's own data directory (ledger,
-// signing key, salt) per plan D27: "RanA's own data directory ... is on the
-// built-in sensitive-read/write watchlist, so a recorded agent touching the
-// recorder is itself a first-class, alertable event." The returned slice is
+// signing key, salt) per the D27 custody guarantee: RanA's own data directory
+// is on the built-in sensitive-read/write watchlist, so a recorded agent
+// touching the recorder is itself a first-class, alertable event. The returned slice is
 // a fresh copy each call — callers may append to it freely.
 func BuiltinSensitivePaths(datadir string) []string {
 	out := make([]string, 0, len(builtinSensitivePaths)+1)

@@ -139,8 +139,7 @@ func TestGuestConfigValidate(t *testing.T) {
 }
 
 func TestGuestConfigDefaultGuestUIDIsPinned1000(t *testing.T) {
-	// docs/ARCHITECTURE.md §6.2 / plan D15: "Guest agent uid pinned
-	// 1000".
+	// docs/ARCHITECTURE.md §6.2: "Guest agent uid pinned 1000".
 	if DefaultGuestUID != 1000 {
 		t.Fatalf("DefaultGuestUID = %d, want 1000", DefaultGuestUID)
 	}

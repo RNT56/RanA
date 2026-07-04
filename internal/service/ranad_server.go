@@ -91,8 +91,7 @@ type ranadConn struct {
 func (c *ranadConn) close() error { return c.conn.Close() }
 
 // SendHead frames and writes r to this connection's ranad peer
-// (docs/TRUST.md §5, plan D27: "the session service reports ... to
-// ranad").
+// (docs/TRUST.md §5: "the session service reports ... to ranad").
 func (c *ranadConn) SendHead(r chain.HeadReport) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

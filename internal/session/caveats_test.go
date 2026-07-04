@@ -11,8 +11,9 @@ func TestAdoptCaveats_UnitAdoption(t *testing.T) {
 		t.Fatal("AdoptCaveats(AdoptModeUnit): expected at least one caveat")
 	}
 	joined := strings.Join(caveats, " | ")
-	// The plan (§4.2.2) documents this exact caveat for unit adoption:
-	// membership begins at restart, so pre-restart history is not covered.
+	// The session/adopt lifecycle documents this exact caveat for unit
+	// adoption: membership begins at restart, so pre-restart history is
+	// not covered.
 	if !strings.Contains(strings.ToLower(joined), "restart") {
 		t.Errorf("AdoptCaveats(AdoptModeUnit) = %v, want a caveat mentioning restart", caveats)
 	}
@@ -24,8 +25,8 @@ func TestAdoptCaveats_PidAdoption(t *testing.T) {
 		t.Fatal("AdoptCaveats(AdoptModePID): expected at least one caveat")
 	}
 	joined := strings.ToLower(strings.Join(caveats, " | "))
-	// plan §4.2.2 / RANA-plan-v1.md line 147: "threads migrate;
-	// already-open fds predate the record".
+	// The session/adopt lifecycle: "threads migrate; already-open fds
+	// predate the record".
 	if !strings.Contains(joined, "thread") {
 		t.Errorf("AdoptCaveats(AdoptModePID) = %v, want a caveat mentioning threads", caveats)
 	}

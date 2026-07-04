@@ -6,7 +6,7 @@ import (
 )
 
 // TestDropIn_GoldenOpenClaw pins the exact drop-in content for the hero
-// adopt case (docs/ARCHITECTURE.md §3, RANA-plan-v1.md §4.2, plan §6.3):
+// adopt case (docs/ARCHITECTURE.md §3):
 // adopting the OpenClaw gateway unit under the fixed rana.slice. Any change
 // to this output is a deliberate, reviewed format change — that is the
 // point of a golden test.
@@ -48,7 +48,7 @@ func TestDropIn_PathIsUnitDirDotConf(t *testing.T) {
 
 func TestDropIn_ContentReferencesFixedSlice(t *testing.T) {
 	// A systemd Slice= property must reference a .slice unit, never a
-	// .scope unit (docs/ARCHITECTURE.md §3, RANA-plan-v1.md §4.2): the
+	// .scope unit (docs/ARCHITECTURE.md §3): the
 	// emitted drop-in always targets the fixed rana.slice regardless of
 	// the scope argument.
 	_, content := DropIn("gateway.service", "rana-XYZ")

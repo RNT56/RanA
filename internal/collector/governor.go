@@ -29,7 +29,7 @@ var SystemClock Clock = systemClock{}
 type EventClass uint8
 
 // EventClass values. The never-shed set and shed order are frozen by
-// CONTRACTS §internal/collector / plan D14:
+// CONTRACTS §internal/collector:
 //
 //	never-shed: exec, connect, sensitive_read, session.*, gap
 //	shed order (lowest value / shed-first, to highest / shed-last):
@@ -231,8 +231,8 @@ func (s *sessionShedState) record(reason, classKey string, n uint64) {
 	m[classKey] += n
 }
 
-// Governor is a per-session token-bucket admission controller (plan D14,
-// CONTRACTS §internal/collector). It sheds low-value event classes first
+// Governor is a per-session token-bucket admission controller
+// (CONTRACTS §internal/collector). It sheds low-value event classes first
 // under sustained load while never shedding the never-shed set, and it
 // accounts every shed/drop so FlushGaps can emit an exact, honest gap
 // event per session per reason (P5 — losses are loud, never silent).

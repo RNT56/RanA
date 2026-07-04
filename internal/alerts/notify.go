@@ -1,5 +1,5 @@
-// Package alerts implements RanA's rules engine (plan §4.3 alert.*, plan
-// Phase 5, docs/ARCHITECTURE.md §4, CONTRACTS §internal/alerts): a set of
+// Package alerts implements RanA's rules engine (the alert.* event taxonomy,
+// docs/ARCHITECTURE.md §4, CONTRACTS §internal/alerts): a set of
 // deterministic rules that consume schema.Event values post-persist (i.e.
 // after the ledger has already committed them — alerts are enrichment on
 // top of an already-durable, already-chained record, never a gate on it)

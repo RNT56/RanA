@@ -10,7 +10,8 @@ import (
 
 // runPlatform (macOS) explains that recording on macOS means running the
 // agent inside RanA's Linux guest — there is no native macOS capture path
-// (Endpoint Security entitlements are closed to OSS; plan D2/D15). This build
+// (Endpoint Security entitlements are closed to OSS; the D2/D15 macOS
+// recording strategy and guest image). This build
 // wires the CLI surface; booting the guest requires the guest image and the
 // `com.apple.security.virtualization` entitlement (see docs/MACOS.md and
 // `rana vm`). RanA never pretends to record a native macOS process.
@@ -27,7 +28,7 @@ func runPlatform(p runParams) int {
 // adoptPlatform (macOS) explains the guest-hosted adopt path: the Linux build
 // of the gateway runs on the guest data volume, config is projected via
 // virtiofs, and :18789 is port-forwarded to host localhost. There is no
-// degraded native mode (plan D18).
+// degraded native mode (the D18 decision against a native macOS fallback).
 func adoptPlatform(p adoptParams) int {
 	fmt.Fprintf(p.Stdout, "rana adopt %s (macOS): the gateway is hosted inside RanA's Linux guest.\n", p.Target)
 	if p.Profile.Adopt != nil && p.Profile.Adopt.GatewayPort != 0 {

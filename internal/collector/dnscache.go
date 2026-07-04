@@ -12,8 +12,8 @@ type dnsEntry struct {
 	expiresAt time.Time // observed + TTL
 }
 
-// DNSCache is a userspace qname<->IP TTL cache (plan §4.3: "net.dns ...
-// joined to subsequent connects by (addr, window)"). ranad's DNS observer
+// DNSCache is a userspace qname<->IP TTL cache: net.dns answers are joined
+// to subsequent connects by (addr, window). ranad's DNS observer
 // calls Observe on every net.dns record; the Enricher calls Join when
 // building a net.connect event so its daddr can be annotated with the
 // qname that resolved to it, if one was seen recently enough.
@@ -54,7 +54,7 @@ func (c *DNSCache) Observe(qname string, answers [][16]byte, ttlSeconds uint32, 
 
 // Join looks up the most recent qname that resolved to addr, returning it
 // only if the entry (a) has not expired per its DNS TTL, and (b) was
-// observed within window of now (plan §4.3's "(addr, window)" join). Both
+// observed within window of now (the "(addr, window)" join). Both
 // conditions must hold — a long TTL does not excuse a stale join outside
 // the window, and a short join window does not excuse serving an
 // already-TTL-expired answer.

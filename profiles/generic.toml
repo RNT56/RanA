@@ -29,11 +29,11 @@ unix_sockets    = true
 scopes = []                 # e.g. ["~/project/**"] to digest a working tree
 
 [sensitive_read]
-# In-kernel watchlist (resolved-path prefix + (dev,inode) pinning; see plan D7).
+# In-kernel watchlist (resolved-path prefix + (dev,inode) pinning).
 # These are the built-in credential locations; a read of any of them is the
 # highest-signal event class. The built-ins also include RanA's OWN data
 # directory (ledger, signing key, salt) — an agent touching the recorder is
-# itself a first-class recorded event (plan D27).
+# itself a first-class recorded event (the D27 custody guarantee).
 # Profiles may EXTEND this list; the built-ins cannot be removed.
 extra = []                  # add paths here; built-ins always apply
 

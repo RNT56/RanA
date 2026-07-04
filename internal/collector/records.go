@@ -1,7 +1,7 @@
 // Package collector decodes RanA's fixed-layout eBPF ring-buffer records
 // into Go values, enriches them into schema.Event (cgid -> session,
 // redaction), joins DNS answers to subsequent connects, and governs event
-// flow under load (CONTRACTS §internal/collector, plan D7/D14/§4.3,
+// flow under load (CONTRACTS §internal/collector,
 // docs/ARCHITECTURE.md §2/§4).
 //
 // This package is fully portable: it has no linux build tags and no

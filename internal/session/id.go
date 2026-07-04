@@ -1,5 +1,5 @@
 // Package session implements RanA's attribution primitive: one cgroup v2
-// leaf per session (plan D6, docs/ARCHITECTURE.md §1, §3). It provides the
+// leaf per session (docs/ARCHITECTURE.md §1, §3). It provides the
 // portable pieces — session id generation, systemd drop-in generation for
 // `rana adopt`, adopt-mode caveat strings, and a platform-agnostic Driver
 // interface — plus (behind //go:build linux) the real cgroup2/systemd

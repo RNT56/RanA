@@ -827,7 +827,7 @@ func TestSynthesizedAlerts_AreWellFormedSchemaEvents(t *testing.T) {
 			t.Errorf("event.Seg = %d, want 3 (passed through from Observe)", ev.Seg)
 		}
 		if ev.Origin != schema.OriginSVC {
-			t.Errorf("event.Origin = %q, want svc (alert.* is svc-emitted per plan §4.3)", ev.Origin)
+			t.Errorf("event.Origin = %q, want svc (alert.* is svc-emitted)", ev.Origin)
 		}
 		if ev.State != schema.StateObserved {
 			t.Errorf("event.State = %q, want observed", ev.State)

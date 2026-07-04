@@ -21,7 +21,7 @@ import (
 // compromise heads.log mirror — populated by the root-owned ranad
 // process, which the attacker's user-level compromise does not control —
 // still holds the original chain_head, and `rana verify --mirror` is the
-// sole check that flags the divergence (plan D27).
+// sole check that flags the divergence (the D27 custody guarantee).
 func TestFullyConsistentForgeryCaughtOnlyByMirror(t *testing.T) {
 	root := t.TempDir()
 	d := ledger.Dir(root)

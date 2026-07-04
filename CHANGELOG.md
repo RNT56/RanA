@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to RanA and its binding plan. Format: [Keep a Changelog](https://keepachangelog.com/). Plan amendments are versioned per the plan's own rule (§Status).
+All notable changes to RanA. Format: [Keep a Changelog](https://keepachangelog.com/). Entries dated before the code was complete (`[Plan v1.1]`, `[Plan v1.2]`) record amendments to the original design document, which has since been retired; `CLAUDE.md` and the `docs/` set are now the governing references.
 
 ## [Unreleased] — 2026-07-04 (security hardening & leak closure)
 
@@ -56,7 +56,7 @@ Pre-code amendment: an end-to-end design review found one threat-model hole, one
 - **Export format (TRUST §7/§8):** `events.cbor` (canonical bytes) is the authoritative verification artifact. JSON cannot round-trip int64 nanosecond timestamps (> 2⁵³), so re-encoding `events.jsonl` would produce false BROKEN verdicts; JSONL is now a derived, human-readable convenience that is never hashed. The independent verifier hashes the provided canonical bytes (pinned by Merkle roots + signatures) instead of re-encoding.
 - **D13 redaction placement:** the pipeline runs at *every writer ingress* — ranad for kernel events, the session service for markers/session-metadata/digest paths (markers never transit ranad, so "redaction lives in ranad" alone was a gap). Enforcement remains the `Redacted`-only writer type.
 - **D15/D18 macOS honesty:** removed the "keep the gateway native → degraded/inferred causality" option — RanA has no native macOS collector, so a native agent produces *zero* kernel events; "inferred" refers only to running without the marker plugin. macOS adopt either hosts the gateway in the guest (Linux build on the data volume, config projected, port forwarded) or declines with a plain explanation.
-- **Segment seal wording** unified: 4096 events or 60s after the segment's first event (plan §4.4 said "idle", TRUST said "wall" — they now agree).
+- **Segment seal wording** unified: 4096 events or 60s after the segment's first event (the schema spec said "idle", TRUST said "wall" — they now agree).
 - **Phase 3 exit criteria** now require a real agent running in-guest on the runtime layer, not merely identical event types.
 - **Risk register:** added same-uid tampering and macOS runtime-gap rows.
 

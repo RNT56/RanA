@@ -1,6 +1,6 @@
 // Package bpf owns RanA's eBPF CO-RE programs (bpf/src/*.c), the
 // bpf2go-generated Go bindings, and the loader that attaches them on
-// Linux (CONTRACTS §internal/bpf, plan D4/D5/D7, docs/ARCHITECTURE.md
+// Linux (CONTRACTS §internal/bpf, docs/ARCHITECTURE.md
 // §2/§7).
 //
 // This file (loader_tier.go) is deliberately portable — no linux build
@@ -21,7 +21,7 @@ import (
 )
 
 // Tier identifies which feature tier a running kernel supports, per
-// docs/ARCHITECTURE.md §7 / plan D5. `rana doctor` reports the active
+// docs/ARCHITECTURE.md §7. `rana doctor` reports the active
 // tier; the loader uses it to decide which optional programs to attach.
 type Tier int
 
@@ -32,9 +32,9 @@ const (
 	// doctor` reports remediation.
 	TierUnsupported Tier = iota
 	// TierBaseline is the 5.15 LTS floor: tracepoints, ringbuf, fentry,
-	// cgroup/connect4·6, sensitive-read map — the complete v1 product
-	// (plan D5: "The product is complete at Baseline; higher tiers are
-	// efficiency and coverage, not features.").
+	// cgroup/connect4·6, sensitive-read map — the complete v1 product.
+	// The product is complete at Baseline; higher tiers are efficiency and
+	// coverage, not features.
 	TierBaseline
 	// TierEnhanced (>=5.18) adds kprobe-multi for cheaper fs attach.
 	TierEnhanced
@@ -112,7 +112,7 @@ func (t Tier) Features() Features {
 	return f
 }
 
-// Kernel floor and tier thresholds, per plan D5 / docs/ARCHITECTURE.md §7.
+// Kernel floor and tier thresholds, per docs/ARCHITECTURE.md §7.
 var (
 	kernelFloor    = kernelVersion{5, 15, 0}
 	enhancedFloor  = kernelVersion{5, 18, 0}

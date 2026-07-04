@@ -1,7 +1,7 @@
 // Package ledger implements RanA's tamper-evident, secret-free SQLite
 // ledger: single-writer group-commit ingestion, segment sealing, signed
 // ledger-wide checkpointing, verification, export, and cold-archive GC
-// (docs/TRUST.md, plan §4.4, D11/D12/D27). It is part of the trust core and
+// (docs/TRUST.md). It is part of the trust core and
 // held to the strictest testing bar (CLAUDE.md §3.1).
 package ledger
 

@@ -1,6 +1,6 @@
 // Package ui serves RanA's embedded, localhost-only timeline: a canvas
 // "event river" (process/filesystem/network lanes), a session picker, a
-// run-cluster causality view, and a live SSE tail — plan D19,
+// run-cluster causality view, and a live SSE tail —
 // docs/ARCHITECTURE.md §4, CONTRACTS §internal/ui.
 //
 // The UI is a single static bundle (dist/app.js, built by esbuild from
@@ -10,7 +10,7 @@
 // small DataSource interface rather than importing internal/ledger
 // directly, so it is fully unit-testable against a fake.
 //
-// Security posture (docs/THREAT-MODEL.md, plan D19): binding to
+// Security posture (docs/THREAT-MODEL.md): binding to
 // 127.0.0.1 is the caller's job (this package never calls net.Listen).
 // What this package enforces on every route: a per-launch bearer token
 // (header or, for the SSE route which cannot set custom headers, a query
@@ -186,7 +186,7 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		hdr.Set("X-Frame-Options", "DENY")
 		hdr.Set("Referrer-Policy", "no-referrer")
 		// Deliberately no Access-Control-Allow-Origin (or any other CORS
-		// header): the UI is same-origin only, per plan D19.
+		// header): the UI is same-origin only.
 		next.ServeHTTP(w, r)
 	})
 }

@@ -14,7 +14,7 @@ var ErrScopeExists = errors.New("session: scope already exists")
 var ErrScopeNotFound = errors.New("session: scope not found")
 
 // Scope identifies a created cgroup v2 leaf: RanA's one-cgroup-per-session
-// attribution primitive (plan D6, docs/ARCHITECTURE.md §1). Name is the bare
+// attribution primitive (docs/ARCHITECTURE.md §1). Name is the bare
 // scope name (e.g. "rana-01ARZ3NDEKTSV4RRFFQ69G5FAV"), without a leading
 // slice path or trailing ".scope" suffix — drivers append platform-specific
 // decoration as needed.
@@ -25,8 +25,8 @@ type Scope struct {
 
 // Driver abstracts the mechanism that places processes into a session's
 // cgroup leaf: a systemd transient scope via D-Bus when systemd is present,
-// or a raw cgroupfs mkdir+write fallback otherwise (plan §6.1,
-// docs/ARCHITECTURE.md §3). It is intentionally minimal and platform-
+// or a raw cgroupfs mkdir+write fallback otherwise
+// (docs/ARCHITECTURE.md §3). It is intentionally minimal and platform-
 // agnostic so the linux-only implementations are thin shims over this
 // contract, and so the rest of RanA (and tests) can depend on the
 // interface rather than a concrete cgroup mechanism.

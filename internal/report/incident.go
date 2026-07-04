@@ -179,7 +179,7 @@ func writeTimeline(b *strings.Builder, events, alertEvents []schema.Event) {
 
 // describeEvent renders a one-line, type-specific summary of ev's
 // already-redacted Data fields. It only ever reads frozen, documented
-// fields for each type (plan §4.3) — never a generic field dump.
+// fields for each type (the frozen event schema) — never a generic field dump.
 func describeEvent(ev schema.Event) string {
 	switch ev.Type {
 	case schema.EventTypeProcExec:

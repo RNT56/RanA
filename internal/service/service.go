@@ -311,7 +311,7 @@ func (s *Service) appendKernelEvent(ev schema.Event, enc []byte) error {
 
 // onHeadReport is the ledger.Writer's HeadReportFunc: it mirrors every
 // checkpoint head to the currently-connected ranad peer(s)
-// (docs/TRUST.md §5, plan D27).
+// (docs/TRUST.md §5).
 func (s *Service) onHeadReport(r chain.HeadReport) {
 	s.ranadServer.Broadcast(r)
 }

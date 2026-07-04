@@ -7,8 +7,8 @@ import (
 )
 
 // DefaultGuestUID is the fixed uid the guest agent process runs as inside
-// every RanA guest (docs/ARCHITECTURE.md §6.2, RANA-plan-v1.md D15: "Guest
-// agent uid pinned 1000; a mount-time normalization maps ownership").
+// every RanA guest (docs/ARCHITECTURE.md §6.2: "Guest agent uid pinned
+// 1000; a mount-time normalization maps ownership").
 // Pinning it lets host-side virtiofs ownership normalization be a fixed,
 // well-known mapping rather than something computed per session.
 const DefaultGuestUID = 1000
@@ -38,7 +38,7 @@ type VirtiofsTag struct {
 type GuestConfig struct {
 	// DataVolumePath is the host path to the persistent, host-file-backed
 	// ext4 disk image for guest-side installs (docs/MACOS.md §1 "Data
-	// volume"; RANA-plan-v1.md D15).
+	// volume").
 	DataVolumePath string
 
 	// Mounts are the granted host directories to project into the guest

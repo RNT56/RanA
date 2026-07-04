@@ -20,7 +20,8 @@ import (
 	"github.com/RNT56/RanA/internal/session"
 )
 
-// runPlatform (Linux) implements the frozen `run` verb (plan D20, §4.2): it
+// runPlatform (Linux) implements the frozen `run` verb (part of the frozen
+// verb set, per the session/adopt lifecycle): it
 // hosts the per-user session service (svc) in-process, creates the session
 // cgroup scope, emits session.start, execs the child inside the scope, and on
 // exit emits session.end and seals the ledger.
@@ -30,7 +31,7 @@ import (
 // root). The socket lives at <runDir>/ranad.sock where runDir defaults to the
 // user runtime dir (svcRunDir) — see the v1.2 amendment note in
 // docs/ARCHITECTURE.md §3 for why this path is the one documented integration
-// choice the plan otherwise left open. When ranad is attached (and its eBPF
+// choice otherwise left open. When ranad is attached (and its eBPF
 // objects are generated), its redacted event stream flows into this svc and
 // into the ledger; without ranad the child still runs unaffected (P2 —
 // observation is inert) and the timeline is simply empty, which `rana doctor`

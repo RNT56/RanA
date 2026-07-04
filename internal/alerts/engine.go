@@ -76,7 +76,7 @@ func WithTrifectaWindow(window time.Duration) Option {
 	}
 }
 
-// Engine is RanA's alert rules engine (plan §4.3 alert.*, plan Phase 5,
+// Engine is RanA's alert rules engine (the alert.* event taxonomy,
 // CONTRACTS §internal/alerts): a fixed set of deterministic rules driven by
 // a single entry point, Observe, called once per schema.Event AFTER that
 // event has already been durably persisted by the ledger (svc wires this

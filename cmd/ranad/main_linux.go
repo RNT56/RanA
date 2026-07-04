@@ -7,7 +7,7 @@ package main
 // RecordSource/FrameSink pair, and runs the decode->enrich->redact->govern
 // ->frame loop against the svc unix socket, emitting a gap{daemon_restart}
 // frame on every (re)connect and mirroring every Head frame svc sends back
-// into the root-owned heads.log (plan D27) — CONTRACTS §cmd/ranad.
+// into the root-owned heads.log (the D27 mirror write) — CONTRACTS §cmd/ranad.
 //
 // The eBPF attach itself (loading the bpf2go-generated CO-RE objects,
 // opening the ring buffer) is NOT wired here yet: internal/bpf's
@@ -304,7 +304,7 @@ func socketOwnerUID(path string) (uint32, error) {
 // run-dir, a race during svc startup, a misconfigured RANA_RUN_DIR shared
 // across users) would receive ranad's Hello (including the redaction salt)
 // and every enriched kernel event ranad emits, and could feed forged Head
-// frames into the root-owned heads.log mirror (plan D27) — silently
+// frames into the root-owned heads.log mirror (the D27 mirror write) — silently
 // defeating the same-uid tamper-evidence guarantee docs/THREAT-MODEL.md §3.2
 // depends on. Comparing against the file's owning uid (not e.g. a fixed
 // "non-root" assumption) keeps this correct for any recorded user.

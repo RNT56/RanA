@@ -7,7 +7,7 @@ import (
 )
 
 // TestCheckpointChainSpansSessions confirms prev_checkpoint_hash chains
-// across the WHOLE ledger, not per-session (docs/TRUST.md §5, plan D12):
+// across the WHOLE ledger, not per-session (docs/TRUST.md §5):
 // the second session's first checkpoint must chain from the first
 // session's last checkpoint.
 func TestCheckpointChainSpansSessions(t *testing.T) {

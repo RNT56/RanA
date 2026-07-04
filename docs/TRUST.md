@@ -11,7 +11,7 @@ The guarantee, precisely: **any modification, deletion, reordering, or re-signin
 Every event is encoded to a **deterministic byte string** before hashing. Determinism is the whole game — two encoders MUST produce identical bytes for the same event.
 
 - Format: **CBOR** (RFC 8949) in **canonical form**: map keys sorted bytewise, shortest-form integer encoding, no indefinite-length items, no floating point (timestamps are integer nanoseconds).
-- Fields are fixed per event type (see `docs/ARCHITECTURE.md §5` and plan §4.3). Strings are **already redacted** (`docs/REDACTION.md`) at encode time — the encoder never sees a raw secret.
+- Fields are fixed per event type (see `docs/ARCHITECTURE.md §5`). Strings are **already redacted** (`docs/REDACTION.md`) at encode time — the encoder never sees a raw secret.
 - Timestamps: each event carries `(ts_mono, ts_wall)` as integer nanoseconds, both captured in-kernel.
 
 Encoding is stable across RanA versions: a v1.3 verifier can verify a v1.0 ledger. New event types add new keys; they never change the encoding of existing types.
@@ -79,7 +79,7 @@ signature = Ed25519_sign( device_private_key, canonical_cbor(checkpoint) )
 - The **device key** is generated at first run, stored `0600`, optionally passphrase-wrapped. The private key never leaves the machine and is never in an export.
 - `prev_checkpoint_hash` makes the checkpoints one **ledger-wide chain**: segments chain *within* a session; checkpoints chain *across* sessions. Deleting an entire session wholesale therefore breaks the checkpoint chain and is detected — a per-session-only design would not see it.
 - The **unattested tail**: segments sealed after the last checkpoint are hash-linked but not yet signed. `verify` reports them as *unattested* — a normal, expected state for recent data (bounded to ≤5 minutes by the checkpoint timer), distinct from both "verified" and "broken."
-- **Head mirror (same-uid custody, plan D27):** at each checkpoint, the session service reports `(session_id, seg_range, chain_head)` to `ranad`, which appends it to a **root-owned, append-only** `/var/lib/rana/heads.log`. The user-owned key can be stolen by an attacker with the user's uid; heads mirrored *before* the compromise are pinned beyond that attacker's reach. `rana verify --mirror` cross-checks. See `LIMITS.md §6.1`.
+- **Head mirror (same-uid custody, the D27 guarantee):** at each checkpoint, the session service reports `(session_id, seg_range, chain_head)` to `ranad`, which appends it to a **root-owned, append-only** `/var/lib/rana/heads.log`. The user-owned key can be stolen by an attacker with the user's uid; heads mirrored *before* the compromise are pinned beyond that attacker's reach. `rana verify --mirror` cross-checks. See `LIMITS.md §6.1`.
 - Checkpoints bind the chain to an identity and bound the rewrite window: to forge history, an attacker must re-sign every checkpoint from the tampered point forward (requires the private key) **and** match every mirrored head (requires root).
 
 ## 6. What `rana verify` checks

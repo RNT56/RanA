@@ -38,7 +38,7 @@ func TestDispatch_UnknownAndHelp(t *testing.T) {
 	}
 }
 
-// TestDispatch_AllFrozenVerbsRoute confirms every plan-D20 verb is wired (no
+// TestDispatch_AllFrozenVerbsRoute confirms every frozen-verb-set verb is wired (no
 // verb falls through to "unknown command"). We don't assert success — just
 // that the dispatcher recognizes each.
 func TestDispatch_AllFrozenVerbsRoute(t *testing.T) {
@@ -148,7 +148,7 @@ func TestVerify_MirrorDefaultHeadsLogIsNotUnderData(t *testing.T) {
 		t.Fatalf("defaultHeadsLogPath must not be derived from --data; got %q", defaultHeadsLogPath)
 	}
 	if defaultHeadsLogPath != "/var/lib/rana/heads.log" {
-		t.Fatalf("defaultHeadsLogPath = %q, want the documented root-owned mirror path /var/lib/rana/heads.log (docs/TRUST.md §5, LIMITS.md §6.1, plan D27)", defaultHeadsLogPath)
+		t.Fatalf("defaultHeadsLogPath = %q, want the documented root-owned mirror path /var/lib/rana/heads.log (docs/TRUST.md §5, LIMITS.md §6.1)", defaultHeadsLogPath)
 	}
 
 	// Plant a heads.log under --data. If the CLI's default ever regresses to

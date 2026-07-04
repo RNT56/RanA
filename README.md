@@ -154,7 +154,6 @@ Native macOS process recording needs Endpoint Security entitlements Apple grants
 
 ## Documentation
 
-- [`RANA-plan-v1.md`](./RANA-plan-v1.md) &mdash; the binding plan: principles, decisions, roadmap, gates
 - Core specs &mdash; [`ARCHITECTURE`](./docs/ARCHITECTURE.md) · [`THREAT-MODEL`](./docs/THREAT-MODEL.md) · [`TRUST`](./docs/TRUST.md) · [`REDACTION`](./docs/REDACTION.md)
 - [`docs/OPENCLAW.md`](./docs/OPENCLAW.md) &mdash; the adopt flow and causality explainer
 - Platform and process &mdash; [`MACOS`](./docs/MACOS.md) · [`PROFILES`](./docs/PROFILES.md) · [`SECURITY`](./docs/SECURITY.md) · [`CONTRIBUTING`](./CONTRIBUTING.md)

@@ -1,6 +1,6 @@
 // Package chain implements RanA's tamper-evident chain: leaf hashing,
 // Merkle segmentation, segment-header chaining, signed checkpoints, and the
-// ed25519 device-key lifecycle (docs/TRUST.md §2-6, plan D12/D27). It is
+// ed25519 device-key lifecycle (docs/TRUST.md §2-6). It is
 // part of the trust core: the guarantee it exists to deliver is that any
 // modification, deletion, reordering, or re-signing of persisted events is
 // detectable (docs/TRUST.md, LIMITS.md §6 for the exact boundary).

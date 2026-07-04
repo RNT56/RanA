@@ -5,8 +5,7 @@ import "strings"
 // DropIn generates the systemd drop-in path and content that places an
 // existing unit under RanA's fixed top-level slice, rana.slice
 // (docs/ARCHITECTURE.md §3: "generate a systemd drop-in placing its unit
-// under `rana.slice`"; RANA-plan-v1.md §4.2 line 147: "generates a systemd
-// drop-in placing the unit under `rana.slice`"; plan §6.3).
+// under `rana.slice`").
 //
 // The emitted `Slice=` value is always the fixed slice name (SliceName(),
 // "rana.slice") — a systemd Slice= property must reference a .slice unit,

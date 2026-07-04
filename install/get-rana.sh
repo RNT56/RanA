@@ -20,8 +20,7 @@
 # cosign is missing or verification fails.
 #
 # NO telemetry. NO phone-home. The only network calls are the explicit
-# artifact + checksum (+ signature) downloads from the GitHub releases API
-# (plan D24).
+# artifact + checksum (+ signature) downloads from the GitHub releases API.
 #
 # Usage:
 #   curl -fsSL https://get.rana.dev | sh

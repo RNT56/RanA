@@ -13,7 +13,7 @@ import (
 )
 
 // Group-commit and sealing thresholds (CONTRACTS §internal/ledger,
-// docs/TRUST.md §3, §5, plan D11/D12).
+// docs/TRUST.md §3, §5).
 const (
 	groupCommitMaxEvents = 512
 	groupCommitInterval  = 10 * time.Millisecond
@@ -35,7 +35,7 @@ const (
 )
 
 // HeadReportFunc is invoked once per checkpoint with the report to mirror
-// (docs/TRUST.md §5, plan D27). Wired by svc to the ranad socket plus a
+// (docs/TRUST.md §5). Wired by svc to the ranad socket plus a
 // local heads-file fallback; nil is a legal no-op (e.g. in unit tests).
 type HeadReportFunc func(chain.HeadReport)
 

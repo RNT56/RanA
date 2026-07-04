@@ -47,8 +47,8 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dataDir := fs.String("data", defaultDataDir(), "RanA data directory")
 	session := fs.String("session", "", "verify only this session id (default: all)")
-	mirror := fs.Bool("mirror", false, "cross-check against the root-owned heads.log (plan D27)")
-	headsLog := fs.String("heads-log", "", "path to the root-owned heads.log (default: "+defaultHeadsLogPath+"; NOT under --data, which a same-uid attacker can rewrite — plan D27, docs/TRUST.md §5)")
+	mirror := fs.Bool("mirror", false, "cross-check against the root-owned heads.log (the same-uid custody guarantee)")
+	headsLog := fs.String("heads-log", "", "path to the root-owned heads.log (default: "+defaultHeadsLogPath+"; NOT under --data, which a same-uid attacker can rewrite — docs/TRUST.md §5)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -100,7 +100,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 // --format incident) a human-readable incident narrative built from the same
 // recorded events. These are two different renderings of one session's
 // truth, not two verbs — hence flags on the frozen `export` verb rather than
-// a new one (plan D20).
+// a new one (keeping the frozen verb set intact).
 func cmdExport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.SetOutput(stderr)

@@ -1,6 +1,6 @@
 // Package schema defines RanA's frozen event envelope and the typed
-// constructors for every event type in the v1 taxonomy (RANA-plan-v1.md
-// §4.3, docs/TRUST.md §1). It has no dependency on internal/cborcanon —
+// constructors for every event type in the v1 taxonomy (docs/TRUST.md §1).
+// It has no dependency on internal/cborcanon —
 // cborcanon depends on schema (for EncodeEvent), not the reverse.
 //
 // Every captured string that ends up in an Event's Data payload must
@@ -20,11 +20,11 @@ import (
 )
 
 // EventType names one of RanA's event kinds. marker.* is an open,
-// freeform-suffixed family (plan §4.3); every other value is a fixed,
-// frozen constant.
+// freeform-suffixed family (the v1 event taxonomy); every other value is a
+// fixed, frozen constant.
 type EventType string
 
-// Event type constants, per CONTRACTS §internal/schema / plan §4.3.
+// Event type constants, per CONTRACTS §internal/schema.
 const (
 	EventTypeSessionStart EventType = "session.start"
 	EventTypeSessionEnd   EventType = "session.end"
@@ -127,7 +127,7 @@ var knownOrigins = map[Origin]bool{
 
 // State is the event lifecycle state. v1 only ever produces "observed";
 // Phase G (gated/transactional mode, post-1.0) introduces
-// proposed -> committed|discarded without a schema migration (plan D1).
+// proposed -> committed|discarded without a schema migration.
 type State string
 
 // StateObserved is the only State value produced in v1.
@@ -171,7 +171,7 @@ var knownGapReasons = map[GapReason]bool{
 	GapReasonDaemonRestart: true,
 }
 
-// Event is RanA's canonical event envelope (plan §4.3, docs/TRUST.md §1).
+// Event is RanA's canonical event envelope (docs/TRUST.md §1).
 // CBOR map keys at encode time (bytewise-sorted by the encoder, listed here
 // in field order for readability): v, type, session, seg, idx, ts_mono,
 // ts_wall, pid, origin, state, data.
@@ -315,7 +315,7 @@ func NewFsTruncate(session string, seg, idx, tsMono, tsWall uint64, pid uint32, 
 }
 
 // NewFsSettle builds an fs.settle event (emitted by svc's digest worker,
-// profile scopes only — plan D8). prevDigest may be nil for a newly
+// profile scopes only). prevDigest may be nil for a newly
 // created file.
 func NewFsSettle(session string, seg, idx, tsMono, tsWall uint64, pid uint32,
 	path redact.Redacted, prevDigest, newDigest []byte, sizeDelta int64, mtimeNs uint64,
@@ -338,7 +338,7 @@ func NewFsSensitiveRead(session string, seg, idx, tsMono, tsWall uint64, pid uin
 }
 
 // NewNetConnect builds a net.connect event (emitted by eBPF). daddr MUST be
-// 16 bytes (v4-mapped for IPv4, per plan §4.3 / CONTRACTS); proto is "tcp"
+// 16 bytes (v4-mapped for IPv4, per CONTRACTS); proto is "tcp"
 // or "udp".
 func NewNetConnect(session string, seg, idx, tsMono, tsWall uint64, pid uint32, proto string, daddr []byte, dport uint16, family string) Event {
 	return newEnvelope(session, seg, idx, tsMono, tsWall, pid, EventTypeNetConnect, OriginKernel, map[string]any{
@@ -412,7 +412,7 @@ func NewAlertCgroupEscape(session string, seg, idx, tsMono, tsWall uint64, pid u
 
 // NewAlertEscapePrecursor builds an alert.escape_precursor event (emitted
 // by svc rules) — an observable precursor to an unattributable escape
-// (plan §6.4), e.g. in-session exec of a delegation tool.
+// (escape detection), e.g. in-session exec of a delegation tool.
 func NewAlertEscapePrecursor(session string, seg, idx, tsMono, tsWall uint64, pid uint32, precursor redact.Redacted) Event {
 	return newEnvelope(session, seg, idx, tsMono, tsWall, pid, EventTypeAlertEscapePrecursor, OriginSVC, map[string]any{
 		"precursor": precursor,

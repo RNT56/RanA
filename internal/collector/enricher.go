@@ -47,7 +47,7 @@ type EnricherConfig struct {
 	// events only accept redact.Redacted for string-shaped data).
 	Pipeline *redact.Pipeline
 	// DNSCache joins net.connect destination addresses to a recently
-	// observed qname (plan §4.3). Enrich* methods that decode a DNSRecord
+	// observed qname. Enrich* methods that decode a DNSRecord
 	// call DNSCache.Observe; EnrichConnect/EnrichSendmsg call
 	// DNSCache.Join.
 	DNSCache *DNSCache
@@ -96,7 +96,7 @@ func NewEnricher(cfg EnricherConfig) *Enricher {
 }
 
 // BindCgid records that cgid belongs to session. Called by the session
-// lifecycle path (plan D6) when a session's cgroup is created/adopted, and
+// lifecycle path when a session's cgroup is created/adopted, and
 // for every subsequent cgid RanA's eBPF programs pin into the filter map
 // for that session's tree.
 func (e *Enricher) BindCgid(cgid uint64, session string) {
@@ -316,8 +316,8 @@ func (e *Enricher) EnrichConnect(rec ConnectRecord, seg uint64, dnsJoinWindow ti
 // (unconnected-UDP sendto path, D7) — identical enrichment to
 // EnrichConnect, kept as a separate method so callers can account
 // governor/ledger metrics per wire-kind if desired while still producing
-// the same schema.EventTypeNetConnect shape (plan §4.3: both hook
-// families feed the same event type).
+// the same schema.EventTypeNetConnect shape (both hook families feed the
+// same event type).
 func (e *Enricher) EnrichSendmsg(rec SendmsgRecord, seg uint64, dnsJoinWindow time.Duration) (schema.Event, error) {
 	return e.enrichConnectLike(rec.Proto, rec.Family, rec.Pid, rec.Cgid, rec.TsMono, rec.TsWall, rec.Daddr, rec.Dport, seg, dnsJoinWindow)
 }
@@ -406,7 +406,7 @@ func (e *Enricher) EnrichUnixConnect(rec UnixConnectRecord, seg uint64) (schema.
 const unknownSessionLabel = "unknown"
 
 // EnrichMigration builds an alert.cgroup_escape event from a decoded
-// MigrationRecord (plan §3, D7: cgroup_attach_task filtered by the session
+// MigrationRecord (cgroup_attach_task filtered by the session
 // pid-map). The event is attributed to the FROM session when it is known
 // (the session we can actually charge this migration against); if only
 // TO is known the event is attributed there instead. If neither cgid is

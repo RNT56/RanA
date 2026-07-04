@@ -26,7 +26,7 @@ import (
 //go:embed embedded/*.toml
 var embeddedPacks embed.FS
 
-// shippedPackNames lists the shipped Tier-1 (plan D17) and Tier-2 packs, in
+// shippedPackNames lists the shipped Tier-1 and Tier-2 packs, in
 // the order Available() returns them.
 var shippedPackNames = []string{
 	"generic", "claude-code", "codex", "openclaw",

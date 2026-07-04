@@ -1,5 +1,5 @@
 // Package redact implements RanA's non-optional secrets-redaction pipeline
-// (docs/REDACTION.md, plan D13). It is part of the trust core and held to the
+// (docs/REDACTION.md). It is part of the trust core and held to the
 // strictest testing bar (CLAUDE.md §3.1).
 //
 // The load-bearing idea lives in this file: Redacted is the ONLY string type

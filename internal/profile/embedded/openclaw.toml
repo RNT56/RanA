@@ -27,7 +27,8 @@ gateway_port     = 18789
 # Linux: write a systemd drop-in placing the gateway unit under rana.slice, then
 #        restart (with confirmation). Children inherit the session cgroup.
 # macOS: host the gateway INSIDE the rana guest VM — the only recording path on
-#        macOS (a native gateway produces zero kernel events; plan D15/D18).
+#        macOS (a native gateway produces zero kernel events; the macOS guest
+#        image is the only path, native macOS being a degraded fallback).
 #        Adopt installs the Linux build onto the guest data volume, projects
 #        ~/.openclaw via virtiofs, and port-forwards :18789 to host localhost.
 #        ("inferred" below refers only to running WITHOUT the marker plugin.)

@@ -15,8 +15,8 @@ import (
 // that mimics the layout, without touching the real host cgroup tree.
 var cgroupRoot = "/sys/fs/cgroup"
 
-// CgroupDriver is the raw-cgroupfs fallback Driver (plan §6.1,
-// docs/ARCHITECTURE.md §3): used when systemd/D-Bus is unavailable
+// CgroupDriver is the raw-cgroupfs fallback Driver
+// (docs/ARCHITECTURE.md §3): used when systemd/D-Bus is unavailable
 // (containers, minimal distros, cgroup-namespaced environments). It
 // creates rana.slice/rana-<id>.scope directly via mkdir + cgroup.procs
 // writes. It does not write cgroup.subtree_control: RanA's cgid

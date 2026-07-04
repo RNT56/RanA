@@ -23,8 +23,8 @@ var ErrEmptyLayer = errors.New("vm: layer has no bytes")
 // BaseLayer is RanA's embedded base guest image: a reproducible,
 // checksum-pinned Buildroot Linux build (BTF kernel, virtiofs, overlayfs,
 // ranad + guest service baked in), embedded directly in the host `rana`
-// binary (docs/MACOS.md §1 "Base layer"; plan D15/§6.2: "≤60MB,
-// reproducible, checksum-pinned. Embedded in the rana binary").
+// binary (docs/MACOS.md §1 "Base layer": "≤60MB, reproducible,
+// checksum-pinned. Embedded in the rana binary").
 //
 // Because it is embedded (not fetched), verification is a pure local
 // checksum check with no network or filesystem I/O of its own — Bytes is
@@ -85,7 +85,7 @@ type RuntimeLayerConfig struct {
 // RuntimeLayerResolver ensures the runtime layer is present at DestPath,
 // fetching it at most once per call to Ensure and verifying its signature
 // before trusting it — "fetch-once-with-signature" (CONTRACTS
-// §internal/vm; plan D15: "fetched once, signature-checked").
+// §internal/vm).
 type RuntimeLayerResolver struct {
 	cfg RuntimeLayerConfig
 }

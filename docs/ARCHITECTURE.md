@@ -1,6 +1,6 @@
 # Architecture
 
-This expands §4 of `RANA-plan-v1.md`. It is the reference for how a captured effect travels from the kernel to a verifiable line in your ledger, on both platforms.
+This is the reference for how a captured effect travels from the kernel to a verifiable line in your ledger, on both platforms.
 
 ---
 
@@ -66,7 +66,7 @@ macOS host process (rana, CGO+vz):
 
 `ranad` needs root to attach BPF and read the ring buffer. It holds the *least* it can: a minimal capability set (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_RESOURCE` on kernels ≥ 5.11), **no listening TCP sockets**, one peer-authenticated unix socket, and a hardened systemd unit (`ProtectSystem=strict`, `NoNewPrivileges`, `MemoryDenyWriteExecute`). The valuable artifact — your ledger, your signing key, the UI — lives at **user** privilege in `rana`. The UI never runs as root. This keeps the root surface tiny and the sensitive data owned by you.
 
-The split cuts both ways, and RanA accounts for it: the recorded agent usually runs *as the same user* who owns the ledger and key. That's why `ranad` keeps one small piece of root-owned state — an append-only mirror of checkpoint heads (`heads.log`) — so a subverted same-uid agent cannot silently rewrite and re-sign the past (plan D27, `LIMITS.md §6.1`), and why RanA's own data directory is on the built-in sensitive watchlist.
+The split cuts both ways, and RanA accounts for it: the recorded agent usually runs *as the same user* who owns the ledger and key. That's why `ranad` keeps one small piece of root-owned state — an append-only mirror of checkpoint heads (`heads.log`) — so a subverted same-uid agent cannot silently rewrite and re-sign the past (the D27 custody guarantee, `LIMITS.md §6.1`), and why RanA's own data directory is on the built-in sensitive watchlist.
 
 ## 3. Session lifecycle
 

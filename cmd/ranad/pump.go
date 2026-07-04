@@ -1,5 +1,5 @@
 // Package main implements ranad, RanA's privileged Linux collector daemon
-// (CONTRACTS §cmd/ranad, docs/ARCHITECTURE.md §2, plan D7/D10/§6.1).
+// (CONTRACTS §cmd/ranad, docs/ARCHITECTURE.md §2).
 //
 // This file (pump.go) holds the orchestration logic — decode a raw kernel
 // record, enrich it into a schema.Event, redact every captured string
@@ -58,7 +58,7 @@ type FrameSink interface {
 
 // recordClass maps a decoded record's Go type to the collector.EventClass
 // the governor should account it under (CONTRACTS §internal/collector /
-// plan D14's frozen never-shed set and shed order). Session-lifecycle and
+// the D14 frozen never-shed set and shed order). Session-lifecycle and
 // gap events are constructed directly by ranad (not decoded from a kernel
 // record) and are stamped with their classes at the call site instead of
 // through this table.
@@ -99,8 +99,8 @@ func recordClass(rec any) (collector.EventClass, error) {
 // "ev.Seg (part of the canonical, already-hashed event bytes)... " is
 // treated as authoritative, never recomputed downstream) — so whichever
 // process stamps Seg first owns getting this policy right. Since ranad is
-// the first process to build a schema.Event from kernel data (plan §4.3;
-// docs/ARCHITECTURE.md §2's decode->enrich->redact->govern step happens in
+// the first process to build a schema.Event from kernel data (the v1 event
+// schema; docs/ARCHITECTURE.md §2's decode->enrich->redact->govern step happens in
 // ranad, upstream of svc's ledger writer), it must track sealing here.
 //
 // This does not duplicate internal/ledger's own segment *sealing* (Merkle
@@ -182,11 +182,11 @@ type PumpConfig struct {
 	Clock collector.Clock
 	// HeadsLogDir is the directory (must already exist — ranad's setup
 	// creates the root-owned data dir before constructing a Pump) that
-	// heads.log lives under (plan D27, docs/TRUST.md §5: "root-owned,
+	// heads.log lives under (docs/TRUST.md §5: "root-owned,
 	// append-only heads.log").
 	HeadsLogDir string
 	// DNSJoinWindow bounds how recently a net.dns answer must have been
-	// observed to be joined into a net.connect event (plan §4.3). Defaults
+	// observed to be joined into a net.connect event (the v1 event schema). Defaults
 	// to 30s if zero.
 	DNSJoinWindow time.Duration
 }
@@ -194,7 +194,7 @@ type PumpConfig struct {
 // Pump wires one RecordSource to one FrameSink through decode -> enrich ->
 // (redact, inside Enricher) -> govern -> frame (CONTRACTS §cmd/ranad). It
 // also owns the reverse direction: receiving Head frames from svc and
-// mirroring them into the root-owned heads.log (plan D27).
+// mirroring them into the root-owned heads.log (the D27 mirror write).
 type Pump struct {
 	source   RecordSource
 	sink     FrameSink
@@ -526,7 +526,7 @@ func (p *Pump) ReconnectGap(session string) (wire.Frame, error) {
 
 // PumpInbound drains every frame currently available from Sink.Recv,
 // dispatching Head frames to the root-owned heads.log via
-// chain.AppendHead (plan D27 — "this IS the D27 mirror write, the one
+// chain.AppendHead ("this IS the D27 mirror write, the one
 // root-privileged write") and ignoring other frame kinds (Hello/Bye are
 // handled by the connection-setup code that constructs the Sink, not by
 // the steady-state pump). Returns the number of frames read, stopping when

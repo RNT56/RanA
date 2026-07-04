@@ -1,6 +1,6 @@
 // Command rana is the user-facing RanA CLI and session-service host.
 //
-// The verb set is frozen at plan D20: run, adopt, ps, timeline, show, tail,
+// The verb set is frozen (the D20 frozen verb set): run, adopt, ps, timeline, show, tail,
 // verify, export, gc, doctor, vm (vm is macOS-only; on Linux it prints a
 // not-applicable notice). Each verb is deliberately thin — it parses flags
 // and calls into the internal packages, which hold all the real logic.

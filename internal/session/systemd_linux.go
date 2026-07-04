@@ -24,7 +24,7 @@ type systemdProperty struct {
 }
 
 // SystemdDriver is the primary Driver implementation on hosts where
-// systemd is present (plan §6.1, docs/ARCHITECTURE.md §3): it creates
+// systemd is present (docs/ARCHITECTURE.md §3): it creates
 // session scopes as systemd transient units via the private D-Bus
 // StartTransientUnit call, so `systemctl status rana-<id>.scope` and
 // friends work naturally, and cleanup follows normal systemd scope

@@ -4,8 +4,8 @@ This file is the **interface contract** for every package in RanA: what each
 package is responsible for, the load-bearing types and functions it exposes, the
 invariants it upholds, and how it is meant to be tested. It exists so the layers
 can be built and verified independently (CLAUDE.md §3.2, "maximum-DAG
-parallelism"): every package codes against the frozen **event schema** (plan
-§4.3) and against the contract stated here for its neighbours — not against their
+parallelism"): every package codes against the frozen **v1 event schema**
+and against the contract stated here for its neighbours — not against their
 internals.
 
 Source comments cite this file as `CONTRACTS §<package>` (e.g. `CONTRACTS
@@ -18,9 +18,9 @@ which the sections below cross-reference.
 
 ## Ranking
 
-Contracts here are subordinate to the ten principles (CLAUDE.md §1) and to
-`RANA-plan-v1.md`. Where a contract clause and a principle appear to conflict,
-the principle wins and the clause is the bug.
+Contracts here are subordinate to the ten principles (CLAUDE.md §1). Where a
+contract clause and a principle appear to conflict, the principle wins and the
+clause is the bug.
 
 ## Universal testing bar
 
@@ -80,8 +80,8 @@ with structural validation and redaction enforcement at the type level.
    string literal at a call site.
 6. `net.connect` / `net.flow_close` carry a 16-byte v4-mapped daddr, validated
    structurally; proto ∈ {tcp, udp}.
-7. The envelope's CBOR map-key order is fixed (plan §4.3) so canonical encoding
-   is deterministic.
+7. The envelope's CBOR map-key order is fixed by the v1 event schema so canonical
+   encoding is deterministic.
 
 **Test contract.** Table-driven, one test per event type, each round-tripped
 through `cborcanon.EncodeEvent` + `IsCanonical` to prove no raw string leaks into
@@ -291,7 +291,7 @@ govern event flow under load.
 | `DecodeRecord([]byte)` | Kind-dispatched decode; validates Version/Kind/Len; never panics on hostile input. |
 | `FsOp*` opcodes (incl. `FsOpSensitiveRead`) | `fs.*` operation discriminator; sensitive-read is its own opcode. |
 | `Governor` (`Admit`, `FlushGaps`, `EndSession`) | Per-session token bucket; frozen shed order; gap emission on shed/eviction. |
-| `EventClass` | Never-shed vs. shed-order tiers (plan D14). |
+| `EventClass` | Never-shed vs. shed-order tiers (the D14 shed order). |
 
 **Invariants.**
 
@@ -572,7 +572,7 @@ receive marker/digest ingress faults. Fake clock throughout (no real sleeps).
 
 **Purpose.** The embedded, localhost-only timeline: the "event river" lanes
 (process / filesystem / network), session picker, run-cluster causality view, and
-live SSE tail (plan D19). Served by internal/service's timeline host.
+live SSE tail (the D19 timeline UI). Served by internal/service's timeline host.
 
 **Public surface.**
 
@@ -605,7 +605,7 @@ cancellation.
 
 **Purpose.** The macOS microVM lifecycle via Virtualization.framework: guest
 boot/stop, virtiofs path projection, the vsock control/data plane, and
-vsock↔TCP port-forwarding for adopted services (plan D15/D16). The only CGO in
+vsock↔TCP port-forwarding for adopted services (the D15 guest image and D16 vsock plane). The only CGO in
 the tree (vz).
 
 **Public surface.**

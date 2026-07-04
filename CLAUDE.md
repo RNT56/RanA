@@ -1,6 +1,6 @@
 # CLAUDE.md — Execution Contract for RanA
 
-This file governs autonomous work on RanA. It is **binding**. When any instruction conflicts with `RANA-plan-v1.md`, the plan wins and you stop to flag the conflict. When principles below conflict with each other, the lower-numbered principle wins (they are ranked).
+This file governs autonomous work on RanA. It is **binding**. When principles below conflict with each other, the lower-numbered principle wins (they are ranked).
 
 You are building a **security and forensics tool**. The bar is higher than "works." The bar is: *a stranger relies on this to know what their AI agent did, and is right to.*
 
@@ -36,7 +36,7 @@ These are not "later" — they are **never** for this project. A request touchin
 - Being a wall / enforcement in v1 (gated mode is Phase G, pre-designed, not v1).
 - General host-wide security monitoring (RanA is cgroup-bound to agent sessions; it is not Falco/Tetragon).
 
-When you hit one of these, do not implement it. Note it, cite the principle or `RANA-plan-v1.md §10`, and move on.
+When you hit one of these, do not implement it. Note it, cite the principle or `CLAUDE.md §2`, and move on.
 
 ## 3. How we work
 
@@ -55,7 +55,7 @@ Structure work as a dependency graph and run independent nodes concurrently. The
 
 - `internal/ledger`, `internal/redact`, `internal/profile`, `internal/ui` have **no dependency** on `internal/bpf` and can be built and fully tested against synthetic event streams in parallel with kernel work.
 - `internal/vm` (macOS) depends only on the event-stream contract, not on the Linux collector internals.
-- Define the **event schema (plan §4.3) first and freeze it**; every other node codes against the schema, not against each other.
+- Define the **v1 event schema first and freeze it**; every other node codes against the schema, not against each other.
 
 Serialize only where the graph truly forces it (schema before consumers; capture backend before end-to-end tests).
 
@@ -109,10 +109,10 @@ CI matrix: LTS kernels (5.15, 6.1, 6.6, latest) on amd64 + arm64; a macOS runner
 4. Observe-mode hooks have no `bpf_probe_write`, no return-value override, no blocking helper. (CI greps the compiled program list.)
 5. Every `gap` has counts + reason; no code path drops events without emitting one.
 6. Marker events always carry `origin=enrichment`; nothing marker-sourced is treated as authoritative.
-7. Every string reaching the ledger writer passes redaction **in the process it arrives in** — ranad for kernel events, the session service for markers/metadata/digest paths. The `Redacted`-only writer type enforces this in both. (Plan D13, v1.1.)
-8. Every checkpoint carries `prev_checkpoint_hash` (ledger-wide chain) and its head is reported to ranad's root-owned mirror; `test/chain-mutations/` includes whole-session deletion and rewrite-and-re-sign-with-the-real-key, both caught (the latter by `verify --mirror`). (Plan D12/D27, v1.1.)
-9. File events carry `path_source` (`resolved` | `claimed`); nothing treats a `claimed` path as kernel ground truth. (Plan D7, v1.1.)
+7. Every string reaching the ledger writer passes redaction **in the process it arrives in** — ranad for kernel events, the session service for markers/metadata/digest paths. The `Redacted`-only writer type enforces this in both. (The D13 redact-before-hash rule, v1.1.)
+8. Every checkpoint carries `prev_checkpoint_hash` (ledger-wide chain) and its head is reported to ranad's root-owned mirror; `test/chain-mutations/` includes whole-session deletion and rewrite-and-re-sign-with-the-real-key, both caught (the latter by `verify --mirror`). (The D12 checkpoint chain and D27 custody guarantee, v1.1.)
+9. File events carry `path_source` (`resolved` | `claimed`); nothing treats a `claimed` path as kernel ground truth. (The D7 hook set, v1.1.)
 
 ## 7. When in doubt
 
-Optimize for the stranger who trusts the record. If a choice trades a little convenience for a stronger or more honest guarantee, take the guarantee. If you're unsure whether something is in scope, it probably isn't — check §2 and `RANA-plan-v1.md §10`. If a decision isn't covered by the plan, stop and surface it rather than inventing policy.
+Optimize for the stranger who trusts the record. If a choice trades a little convenience for a stronger or more honest guarantee, take the guarantee. If you're unsure whether something is in scope, it probably isn't — check §2 (the scope walls). If a decision isn't covered by this contract, stop and surface it rather than inventing policy.

@@ -93,8 +93,8 @@ type VerifyOptions struct {
 	Session string
 
 	// Mirror, when true, cross-checks every checkpoint against the
-	// root-owned heads.log at HeadsLogPath (docs/TRUST.md §6 step 6,
-	// plan D27). Requires HeadsLogPath to be set.
+	// root-owned heads.log at HeadsLogPath (docs/TRUST.md §6 step 6).
+	// Requires HeadsLogPath to be set.
 	Mirror       bool
 	HeadsLogPath string
 }
@@ -430,7 +430,7 @@ func readSegmentEvents(db *sql.DB, session string, firstRowID, lastRowID int64) 
 
 // verifyLedgerWideCheckpointChain confirms prev_checkpoint_hash continuity
 // across the WHOLE ledger (docs/TRUST.md §5), in checkpoint-id order —
-// this is what catches whole-session deletion (plan D12): a deleted
+// this is what catches whole-session deletion (the whole-ledger checkpoint chain): a deleted
 // session's checkpoints vanish from the sequence, breaking the hash link
 // between its neighbors.
 func verifyLedgerWideCheckpointChain(db *sql.DB) ([]Finding, error) {
@@ -461,7 +461,7 @@ func verifyLedgerWideCheckpointChain(db *sql.DB) ([]Finding, error) {
 }
 
 // verifyMirror cross-checks every checkpoint in the ledger against the
-// root-owned heads.log at headsPath (docs/TRUST.md §6 step 6, plan D27).
+// root-owned heads.log at headsPath (docs/TRUST.md §6 step 6).
 // A checkpoint whose (session, seg_last, chain_head) has no matching
 // mirrored HeadReport is reported as a possible post-mirror rewrite —
 // this is the ONLY check in the suite that can catch a rewrite-and-

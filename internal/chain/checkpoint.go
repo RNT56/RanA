@@ -12,7 +12,7 @@ import (
 // sealed segments (docs/TRUST.md §5). Checkpoints chain across the WHOLE
 // ledger (not just within a session) via PrevCheckpointHash — deleting an
 // entire session wholesale therefore breaks the checkpoint chain and is
-// detected (plan D12).
+// detected (the whole-ledger checkpoint chain).
 type Checkpoint struct {
 	SessionID          string
 	SegFirst, SegLast  uint64

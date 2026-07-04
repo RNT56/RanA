@@ -6,7 +6,7 @@ import (
 )
 
 // TestTierForKernel exercises the tier-decision table (docs/ARCHITECTURE.md
-// §7, plan D5): baseline at 5.15, kprobe-multi ("enhanced") at >=5.18, tcx
+// §7): baseline at 5.15, kprobe-multi ("enhanced") at >=5.18, tcx
 // ("preferred") at >=6.6, and a hard floor below 5.15.
 func TestTierForKernel(t *testing.T) {
 	tests := []struct {

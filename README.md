@@ -10,7 +10,7 @@
 
 <p>
 <img src="https://img.shields.io/badge/license-Apache--2.0-1E6FE0" alt="License Apache-2.0">
-<img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white" alt="Go 1.24+">
+<img src="https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white" alt="Go 1.26+">
 <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-2b7fff" alt="Linux and macOS">
 <img src="https://img.shields.io/badge/kernel-5.15+-1E6FE0" alt="Kernel 5.15+">
 <img src="https://img.shields.io/badge/telemetry-none-2ea043" alt="No telemetry">
@@ -158,6 +158,7 @@ Native macOS process recording needs Endpoint Security entitlements Apple grants
 - Core specs &mdash; [`ARCHITECTURE`](./docs/ARCHITECTURE.md) · [`THREAT-MODEL`](./docs/THREAT-MODEL.md) · [`TRUST`](./docs/TRUST.md) · [`REDACTION`](./docs/REDACTION.md)
 - [`docs/OPENCLAW.md`](./docs/OPENCLAW.md) &mdash; the adopt flow and causality explainer
 - Platform and process &mdash; [`MACOS`](./docs/MACOS.md) · [`PROFILES`](./docs/PROFILES.md) · [`SECURITY`](./docs/SECURITY.md) · [`CONTRIBUTING`](./CONTRIBUTING.md)
+- For contributors &mdash; [`docs/CONTRACTS.md`](./docs/CONTRACTS.md): the per-package interface contract every layer is built and tested against
 
 ## License
 

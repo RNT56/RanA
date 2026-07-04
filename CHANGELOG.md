@@ -30,7 +30,7 @@ A multi-dimension architecture/robustness/security review of the complete, all-g
 
 ### Decided (v1.2 — the one integration choice the plan left open)
 - **`rana run` hosts the per-user svc in-process** and binds the ranad socket at `<RANA_RUN_DIR>/ranad.sock` (default: the user runtime dir); svc listens, root `ranad` dials, SO_PEERCRED-gated to root (D10). Documented in `docs/ARCHITECTURE.md §3`.
-- **Deferred, documented open items:** multi-user event routing (one root ranad → several users' svc sockets) and a ranad↔svc session-end wire signal to evict finished-session collector state. Until the latter lands, ranad's per-session Governor/segTracker/cgid state grows with the number of distinct sessions over the daemon's uptime (a slow, bounded, documented growth — `LIMITS.md`).
+- **Deferred, documented open items (at v1.2):** multi-user event routing (one root ranad → several users' svc sockets) and a ranad↔svc session-end wire signal to evict finished-session collector state. At v1.2, ranad's per-session Governor/segTracker/cgid state grew with the number of distinct sessions over the daemon's uptime (a slow, bounded, documented growth). **Update:** the session-end signal has since landed — see *[Unreleased] → Leak closed* above; that growth is now bounded. Multi-user routing remains deferred (`LIMITS.md §8`).
 
 ### Note on verification
 Every pure-Go layer and the full wire→svc→ledger→verify→export→standalone-verifier path is race-tested green on darwin; the eBPF collector and the Linux daemon socket lifecycle are compile-verified for `GOOS=linux` (they require generated CO-RE objects + a Linux kernel + root, exercised in CI, not on the dev host).

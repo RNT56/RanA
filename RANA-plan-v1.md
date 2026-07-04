@@ -328,7 +328,8 @@ rana/
 │   ├── PROFILES.md           # authoring guide
 │   ├── MACOS.md              # entitlements, self-signing, guest image build/verify
 │   ├── OPENCLAW.md           # adopt flow + plugin install + causality explainer
-│   └── SECURITY.md           # disclosure policy, ranad surface, hardening rationale
+│   ├── SECURITY.md           # disclosure policy, ranad surface, hardening rationale
+│   └── CONTRACTS.md          # per-package interface contracts (built/tested against)
 ├── CHANGELOG.md              # Keep-a-Changelog; plan amendments referenced
 ├── CONTRIBUTING.md           # DCO, no CLA, build, test rig
 ├── cmd/rana/                 # CLI + user session service + UI host (Linux static; macOS CGO+vz)

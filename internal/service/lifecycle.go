@@ -52,9 +52,21 @@ func (s *Service) StartMarkerListener() error {
 func (s *Service) emitMarker(ev schema.Event) error {
 	ev.Idx = s.nextIdx(ev.Session)
 	if err := s.appendAndPublish(ev); err != nil {
-		return err
+		return s.reportFault(err)
 	}
-	return s.alertEngine.Observe(ev, ev.Seg)
+	return s.reportFault(s.alertEngine.Observe(ev, ev.Seg))
+}
+
+// reportFault surfaces err (if non-nil) to cfg.OnFault before returning it, so
+// a failure on the marker or digest ingress is loud (P5) even though those
+// callers (the marker listener, the digest worker) intentionally discard the
+// returned error to keep going. Mirrors the kernel-event path, which reaches
+// OnFault via RanadServer.OnDecodeError. Returns err unchanged.
+func (s *Service) reportFault(err error) error {
+	if err != nil && s.cfg.OnFault != nil {
+		s.cfg.OnFault(err)
+	}
+	return err
 }
 
 // StartDigestWorker builds and runs a DigestWorker over the profile's
@@ -100,9 +112,9 @@ func (s *Service) StartDigestWorker() error {
 func (s *Service) emitDigest(ev schema.Event) error {
 	ev.Idx = s.nextIdx(ev.Session)
 	if err := s.appendAndPublish(ev); err != nil {
-		return err
+		return s.reportFault(err)
 	}
-	return s.alertEngine.Observe(ev, ev.Seg)
+	return s.reportFault(s.alertEngine.Observe(ev, ev.Seg))
 }
 
 // EmitSessionStart appends a session.start event (svc-origin,

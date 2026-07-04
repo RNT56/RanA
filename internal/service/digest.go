@@ -297,10 +297,10 @@ func (w *DigestWorker) maybeDigest(p string, st *fileState, size int64, now time
 	st.settledSize = size
 	st.everDigested = true
 
-	// KNOWN GAP (P5): see the identical note at marker_listener.go's Emit
-	// call site — this discards Emit's error with no logging and no gap
-	// event, so a failed fs.settle append (including a fatal Writer.Err()
-	// commit failure) is silently lost today.
+	// The worker discards Emit's error (it must keep scanning), but the error
+	// is surfaced by svc's Emit callback (emitDigest, lifecycle.go) to
+	// Config.OnFault before returning — a failed fs.settle append is not
+	// silently lost (P5), symmetric with the marker and kernel-event paths.
 	_ = w.cfg.Emit(ev)
 }
 

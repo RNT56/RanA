@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -312,5 +313,48 @@ func TestService_SessionLifecycleAndDigestWorker(t *testing.T) {
 	}
 	if result.Code != ledger.CodeOK {
 		t.Fatalf("verify code = %d, want OK; findings=%+v", result.Code, result.Findings)
+	}
+}
+
+// TestOnFaultReceivesMarkerDigestIngressFaults confirms P5 (losses are loud)
+// holds on the marker/digest ingress paths, not just the kernel path: a
+// fault surfaced by emitMarker/emitDigest reaches Config.OnFault even though
+// the marker listener and digest worker discard the returned error to keep
+// serving. Tests the shared reportFault mechanism those callbacks use.
+func TestOnFaultReceivesMarkerDigestIngressFaults(t *testing.T) {
+	dir := newTestLedgerDir(t)
+	salt, err := dir.LoadOrCreateSalt()
+	if err != nil {
+		t.Fatalf("salt: %v", err)
+	}
+	var faults []error
+	svc, err := NewService(Config{
+		LedgerDir:     dir,
+		Profile:       mustProfile(t, "generic"),
+		Session:       "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		Clock:         SystemClock,
+		LaunchToken:   "tok",
+		RedactionSalt: salt,
+		OnFault:       func(e error) { faults = append(faults, e) },
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	defer svc.Close()
+
+	// A non-nil fault is surfaced and returned unchanged.
+	boom := errors.New("simulated ingress fault")
+	if got := svc.reportFault(boom); got != boom {
+		t.Fatalf("reportFault returned %v, want the original error", got)
+	}
+	if len(faults) != 1 || faults[0] != boom {
+		t.Fatalf("OnFault received %v, want exactly [%v]", faults, boom)
+	}
+	// A nil fault must not invoke OnFault.
+	if got := svc.reportFault(nil); got != nil {
+		t.Fatalf("reportFault(nil) = %v, want nil", got)
+	}
+	if len(faults) != 1 {
+		t.Fatalf("OnFault called on a nil error: %v", faults)
 	}
 }

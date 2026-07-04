@@ -252,7 +252,13 @@ func (h *handler) serveIndexOrAsset(w http.ResponseWriter, r *http.Request) {
 	if path == "" || path == "index.html" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(indexHTML)
+		// Inject the per-launch token so the browser can load the (also
+		// token-gated) assets and call the API: a static index served from a
+		// page opened at /?token=… cannot otherwise propagate the token to its
+		// sub-resource requests, which would 401. The token is same-origin and
+		// short-lived; embedding it in the user's own page is the correct
+		// mechanism (no cookies, CSP default-src 'self').
+		_, _ = w.Write(bytes.ReplaceAll(indexHTML, []byte("__RANA_TOKEN__"), []byte(h.token)))
 		return
 	}
 

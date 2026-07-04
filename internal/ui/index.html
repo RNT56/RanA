@@ -3,32 +3,59 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="rana-token" content="__RANA_TOKEN__">
 <title>RanA — Timeline</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?t=__RANA_TOKEN__">
 </head>
 <body>
-<header>
-  <h1>RanA</h1>
-  <select id="session-picker" aria-label="Session picker"></select>
-  <div id="status"></div>
-</header>
-<main>
-  <section class="panel">
-    <h2>Event river</h2>
-    <div id="river-wrap">
-      <canvas id="river" width="1000" height="260"></canvas>
-    </div>
-  </section>
-  <section class="panel">
-    <h2>Run clusters</h2>
-    <div id="clusters"></div>
-  </section>
-  <section class="panel">
-    <h2>Selected event</h2>
-    <div id="detail">Click a marker on the river to inspect it.</div>
-  </section>
-</main>
-<div id="tooltip"></div>
-<script src="/app.js"></script>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><span class="dot"></span><b>RanA</b><span class="mono">— flight recorder</span></div>
+    <div class="grow"></div>
+    <span class="chip mono" id="scope">kernel-truth · effects only</span>
+    <span class="chip" id="verify">chain</span>
+  </header>
+
+  <div class="shell">
+    <aside class="panel rail">
+      <div class="phead"><h3>Sessions</h3><span class="mono dim" id="sess-count"></span></div>
+      <div id="sessions"></div>
+    </aside>
+
+    <main class="col">
+      <div class="summary" id="summary"></div>
+
+      <section class="panel">
+        <div class="phead">
+          <div class="tl-head"><h3>Timeline</h3><span class="who mono" id="who"></span></div>
+          <div class="legend">
+            <span class="lg"><i class="proc"></i>process</span>
+            <span class="lg"><i class="fs"></i>filesystem</span>
+            <span class="lg"><i class="net"></i>network</span>
+          </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="river"></canvas></div>
+        <div class="hint mono" id="hint">select a session · hover the river · click an event to inspect it</div>
+      </section>
+
+      <section class="panel feed">
+        <div class="phead"><h3>Signal</h3><span class="chip mono">what needs your eyes</span></div>
+        <div id="alerts"><div class="empty">No alerts in this session.</div></div>
+      </section>
+    </main>
+
+    <aside class="panel detail">
+      <div class="phead"><h3>Record</h3><span class="chip mono" id="detail-origin"></span></div>
+      <div class="dbody" id="detail"><div class="empty">Click an event on the river.</div></div>
+    </aside>
+  </div>
+
+  <footer class="foot mono">
+    <span>ledger on host</span><span>· secrets never persist</span><span>· <span class="dim">rana verify</span> reproduces this from the signed chain</span>
+  </footer>
+</div>
+<div id="tooltip" class="tooltip mono"></div>
+<script src="/app.js?t=__RANA_TOKEN__"></script>
 </body>
 </html>

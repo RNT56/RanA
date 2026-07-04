@@ -254,7 +254,7 @@ func TestHandler_ServesStylesheetSameOrigin(t *testing.T) {
 	h := newTestHandler(t, ds)
 	indexRec := doReq(t, h, http.MethodGet, "/", testToken)
 	body := indexRec.Body.String()
-	if !strings.Contains(body, `<link rel="stylesheet" href="/style.css">`) {
+	if !strings.Contains(body, `href="/style.css`) {
 		t.Skip("index.html does not link a stylesheet; nothing to verify")
 	}
 	rec := doReq(t, h, http.MethodGet, "/style.css", testToken)
@@ -267,6 +267,22 @@ func TestHandler_ServesStylesheetSameOrigin(t *testing.T) {
 	}
 	if rec.Body.Len() == 0 {
 		t.Fatal("GET /style.css returned empty body")
+	}
+}
+
+// TestHandler_InjectsToken proves the handler substitutes the per-launch token
+// into the served index so the browser can load the (also token-gated) assets
+// and call the API — a static index cannot know the token, and without this
+// the sub-resource requests would 401 in a real browser.
+func TestHandler_InjectsToken(t *testing.T) {
+	ds := &fakeSource{}
+	h := newTestHandler(t, ds)
+	body := doReq(t, h, http.MethodGet, "/", testToken).Body.String()
+	if strings.Contains(body, "__RANA_TOKEN__") {
+		t.Fatalf("index still contains the __RANA_TOKEN__ placeholder — token not injected")
+	}
+	if !strings.Contains(body, testToken) {
+		t.Fatalf("index does not contain the injected token; body=%s", body)
 	}
 }
 

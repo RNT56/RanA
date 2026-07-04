@@ -4,7 +4,7 @@ RanA is a security and forensics tool; a vulnerability in it is worth more to an
 
 ## Reporting a vulnerability
 
-**Do not open a public issue.** Report privately via GitHub Security Advisories on the RanA repository ("Report a vulnerability"). If that is unavailable, use the security contact published on rana.dev.
+**Do not open a public issue.** Report privately via GitHub Security Advisories on the RanA repository ("Report a vulnerability") — this is the canonical private channel and is always available on the repo. If for some reason you cannot use it, open a public issue containing only "security report — please open a private channel" with **no** technical detail, and a maintainer will follow up privately.
 
 Include: affected version/commit, platform + kernel, reproduction steps, and your assessment of impact. Proof-of-concept exploits are welcome; live exploitation of third parties is not.
 

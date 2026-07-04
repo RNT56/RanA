@@ -30,7 +30,7 @@ It never reads prompts or completions. It records **effects, not thoughts**.
 ```text
 Already running OpenClaw?
 
-    curl -fsSL https://get.rana.dev | sh
+    curl -fsSL https://raw.githubusercontent.com/RNT56/RanA/main/install/get-rana.sh | sh
     rana adopt openclaw
 
 Open the timeline. That's it.
@@ -71,7 +71,7 @@ Install &mdash; one static binary plus a privileged collector; on macOS the Linu
 
 ```sh
 # Linux (kernel 5.15+, cgroup v2) or macOS 13+ (Apple Silicon)
-curl -fsSL https://get.rana.dev | sh
+curl -fsSL https://raw.githubusercontent.com/RNT56/RanA/main/install/get-rana.sh | sh
 
 # check your machine's capability tier
 rana doctor

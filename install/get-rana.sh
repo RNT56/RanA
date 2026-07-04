@@ -23,7 +23,7 @@
 # artifact + checksum (+ signature) downloads from the GitHub releases API.
 #
 # Usage:
-#   curl -fsSL https://get.rana.dev | sh
+#   curl -fsSL https://raw.githubusercontent.com/RNT56/RanA/main/install/get-rana.sh | sh
 #   RANA_VERSION=v0.1.0 sh get-rana.sh        # pin a version
 #   RANA_PREFIX=/opt/bin sh get-rana.sh       # custom install prefix
 #   RANA_REQUIRE_COSIGN=1 sh get-rana.sh      # fail closed if cosign missing/fails

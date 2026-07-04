@@ -157,6 +157,7 @@ Native macOS process recording needs Endpoint Security entitlements Apple grants
 - Core specs &mdash; [`ARCHITECTURE`](./docs/ARCHITECTURE.md) · [`THREAT-MODEL`](./docs/THREAT-MODEL.md) · [`TRUST`](./docs/TRUST.md) · [`REDACTION`](./docs/REDACTION.md)
 - [`docs/OPENCLAW.md`](./docs/OPENCLAW.md) &mdash; the adopt flow and causality explainer
 - Platform and process &mdash; [`MACOS`](./docs/MACOS.md) · [`PROFILES`](./docs/PROFILES.md) · [`SECURITY`](./docs/SECURITY.md) · [`CONTRIBUTING`](./CONTRIBUTING.md)
+- Design notes &mdash; [`MULTIUSER`](./docs/MULTIUSER.md) (system-wide ranad) · [`MACOS-NATIVE`](./docs/MACOS-NATIVE.md) (native ES path option)
 - For contributors &mdash; [`docs/CONTRACTS.md`](./docs/CONTRACTS.md): the per-package interface contract every layer is built and tested against
 
 ## License

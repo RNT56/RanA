@@ -49,44 +49,38 @@ const struct rana_dns_record *__rana_btf_rana_dns_record __attribute__((unused))
 				    * static bound. */
 
 struct rana_dns_cursor {
-	void *data;
-	void *data_end;
+	struct __sk_buff *skb;
 	__u32 off;
 };
 
-/* rana_read_u8/u16 bounds-check against data_end before every read —
- * skb data pointers in cgroup_skb context can only be dereferenced after
- * an explicit verifier-visible bounds check, and this project reads
- * nothing beyond the DNS header + question/answer name and type/class
- * fields (never TXT/MX/other rdata, per the file header). */
+/* rana_read_u8/u16 read via bpf_skb_load_bytes, which bounds-checks
+ * against the skb at RUNTIME inside the helper — no packet pointers, no
+ * verifier range reasoning. This is deliberate, and the result of a real
+ * bring-up fight: direct data/data_end access in this dynamically-offset
+ * parser was rejected by the verifier across three successive shapes
+ * (re-derived pointers, single-lineage pointers, barrier-pinned
+ * pointers) because clang kept materializing an alternate derivation of
+ * the checked pointer — the compare blessed one register id, the load
+ * used another (e.g. "R4(id=35,off=1,r=0) offset is outside of the
+ * packet" while the id=36 twin was checked). The helper form removes the
+ * entire class by construction; the cost is one helper call per read on
+ * UDP-port-53 packets only. Nothing beyond the DNS header +
+ * question/answer name and type/class fields is ever read (never
+ * TXT/MX/other rdata, per the file header). */
 static __always_inline int rana_read_u8(struct rana_dns_cursor *c, __u8 *out)
 {
-	/* Check and dereference the SAME derived pointer, and PIN it: the
-	 * verifier's packet range attaches to a specific register id, and
-	 * without the barrier clang CSEs consecutive cursor reads onto one
-	 * stale base — the bounds compares run on the freshly derived
-	 * pointers while the loads go through the old id with range 0. A
-	 * real verifier log showed exactly that: checks on pkt id=42/43,
-	 * then `r0 = *(u8 *)(r1 +1)` with R1(id=39, r=0) rejected. The
-	 * barrier makes p opaque, forcing every load through the register
-	 * the compare blessed. */
-	__u8 *p = (__u8 *)c->data + c->off;
-	rana_barrier_var(p);
-	if ((void *)(p + 1) > c->data_end)
+	if (bpf_skb_load_bytes(c->skb, c->off, out, 1) < 0)
 		return -1;
-	*out = *p;
 	c->off += 1;
 	return 0;
 }
 
 static __always_inline int rana_read_u16(struct rana_dns_cursor *c, __u16 *out)
 {
-	/* Same single-pointer-lineage + pin rule as rana_read_u8. */
-	__u8 *p = (__u8 *)c->data + c->off;
-	rana_barrier_var(p);
-	if ((void *)(p + 2) > c->data_end)
+	__u8 b[2];
+	if (bpf_skb_load_bytes(c->skb, c->off, b, 2) < 0)
 		return -1;
-	*out = ((__u16)p[0] << 8) | p[1];
+	*out = ((__u16)b[0] << 8) | b[1];
 	c->off += 2;
 	return 0;
 }
@@ -159,23 +153,26 @@ int rana_dns_egress(struct __sk_buff *skb)
 	if (skb->protocol != bpf_htons(ETH_P_IP))
 		return 1;
 
-	void *data = (void *)(long)skb->data;
-	void *data_end = (void *)(long)skb->data_end;
+	/* Header fields via bpf_skb_load_bytes, like the cursor reads below
+	 * (see the note above rana_read_u8 for why this program avoids
+	 * direct packet pointers entirely). Byte 0 = version/ihl, byte 9 =
+	 * protocol; UDP dest port sits 2 bytes into the UDP header. */
+	__u8 vihl, l4proto;
+	if (bpf_skb_load_bytes(skb, 0, &vihl, 1) < 0)
+		return 1;
+	if (bpf_skb_load_bytes(skb, 9, &l4proto, 1) < 0)
+		return 1;
+	if (l4proto != IPPROTO_UDP)
+		return 1;
 
-	struct iphdr *ip = data;
-	if ((void *)(ip + 1) > data_end)
-		return 1;
-	if (ip->protocol != IPPROTO_UDP)
+	__u32 ip_hlen = (__u32)(vihl & 0x0f) * 4;
+	if (ip_hlen < sizeof(struct iphdr))
 		return 1;
 
-	int ip_hlen = ip->ihl * 4;
-	if (ip_hlen < (int)sizeof(struct iphdr))
+	__u8 dportb[2];
+	if (bpf_skb_load_bytes(skb, ip_hlen + 2, dportb, 2) < 0)
 		return 1;
-
-	struct udphdr *udp = data + ip_hlen;
-	if ((void *)(udp + 1) > data_end)
-		return 1;
-	if (bpf_ntohs(udp->dest) != RANA_DNS_PORT)
+	if ((((__u16)dportb[0] << 8) | dportb[1]) != RANA_DNS_PORT)
 		return 1;
 
 	/* Attribution comes from the SOCKET's cgroup (bpf_skb_cgroup_id),
@@ -190,9 +187,8 @@ int rana_dns_egress(struct __sk_buff *skb)
 		return 1;
 
 	struct rana_dns_cursor cur = {
-		.data = data,
-		.data_end = data_end,
-		.off = (__u32)(ip_hlen + sizeof(struct udphdr)),
+		.skb = skb,
+		.off = ip_hlen + (__u32)sizeof(struct udphdr),
 	};
 
 	__u16 qdcount;
@@ -300,8 +296,9 @@ int rana_dns_egress(struct __sk_buff *skb)
 		} else {
 			/* Not an address record: skip rdlength bytes without
 			 * ever copying them into the record (qname/answers
-			 * only, per the file header scope wall). */
-			if (cur.data + cur.off + rdlength > cur.data_end)
+			 * only, per the file header scope wall). Bounds via
+			 * skb->len — the cursor holds no packet pointers. */
+			if (cur.off + (__u32)rdlength > skb->len)
 				break;
 			cur.off += rdlength;
 		}

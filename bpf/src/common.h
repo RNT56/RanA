@@ -25,6 +25,16 @@
  * note in rana_resolve_path). */
 #define RANA_COMP_MAX 256
 
+/* rana_barrier_var: pin a variable's current value in its register so the
+ * compiler can neither substitute an earlier expression for it nor
+ * reorder it across the pointer arithmetic it guards — the canonical
+ * libbpf `barrier_var` idiom. In rana_resolve_path it pins the MASKED
+ * offset so the write pointer is provably formed from the masked value
+ * (without it, strength reduction folds the raw helper return — negative
+ * errno range and all — straight into the next write pointer, which a
+ * real 5.15 verifier rejected as "R7 unbounded memory access"). */
+#define rana_barrier_var(var) asm volatile("" : "+r"(var))
+
 #ifndef true
 #define true 1
 #define false 0
@@ -215,6 +225,11 @@ static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, i
 {
 	if (!dentry || !out || out_cap <= RANA_COMP_MAX + 2)
 		return 0; /* every real caller passes >= 1024; see RANA_COMP_MAX */
+	if (out_cap & (out_cap - 1))
+		return 0; /* the emit loop's offset mask requires a power-of-2
+			   * cap. Constant-folds away at every current call
+			   * site (1024/2048); a future non-pow2 caller fails
+			   * safe and loud (empty path) instead of subtly. */
 
 	/* Scratch pointers to each component's name, nearest-leaf first —
 	 * held in the per-CPU scratch map, not the stack (384B against the
@@ -258,8 +273,16 @@ static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, i
 	for (int i = RANA_MAX_PATH_COMPONENTS - 1; i >= 0; i--) {
 		if (i >= n)
 			continue;
-		/* '/' plus a full component must provably fit. */
-		if (off < 0 || off > out_cap - RANA_COMP_MAX - 2)
+		/* Mask, pin, THEN bound: the AND gives the verifier an exact
+		 * var_off (survives anything the previous iteration's helper
+		 * return did to off — including its negative-errno range being
+		 * strength-reduced into pointer arithmetic), the barrier
+		 * guarantees the write pointer is formed from THIS masked
+		 * value, and the constant compare makes '/'+component provably
+		 * fit. Runtime no-op: off never actually exceeds the cap. */
+		off &= out_cap - 1;
+		rana_barrier_var(off);
+		if (off > out_cap - RANA_COMP_MAX - 2)
 			break;
 		out[off] = '/';
 		off++;
@@ -271,18 +294,18 @@ static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, i
 		 * Returns bytes written INCLUDING the NUL (>=1), which the next
 		 * component's '/' (or the final terminator) overwrites. */
 		long l = bpf_probe_read_kernel_str(out + off, RANA_COMP_MAX, name);
-		if (l > 1)
-			off += l - 1;
+		if (l <= 1)
+			continue; /* unreadable or empty name: keep the '/' */
+		off += l - 1;
 	}
 
-	if (off < 0)
-		off = 0;
+	off &= out_cap - 1;
+	rana_barrier_var(off);
 	if (off == 0) {
 		out[0] = '/';
 		off = 1;
 	}
-	if (off < out_cap)
-		out[off] = 0;
+	out[off] = 0;
 	return off;
 }
 

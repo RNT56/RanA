@@ -119,11 +119,17 @@ struct rana_scratch {
 	__u8 path_buf[RANA_CAP_FSOP_PATH];           /* rana_fs pre-match staging */
 };
 
+/* The value is declared by SIZE, not type: struct rana_scratch embeds
+ * struct qstr, whose `name` member is a kernel pointer — bpf2go cannot
+ * generate a Go type for it and fails generation if the map's value
+ * carries that BTF. Userspace never reads this map (pure kernel-side
+ * scratch), so an opaque value loses nothing; the programs cast the
+ * lookup result back to struct rana_scratch* (rana_scratch() below). */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, struct rana_scratch);
+	__uint(value_size, sizeof(struct rana_scratch));
 } rana_scratch_map SEC(".maps");
 
 static __always_inline struct rana_scratch *rana_scratch(void)

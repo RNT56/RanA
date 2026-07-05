@@ -206,6 +206,18 @@ struct socket {
 	struct sock *sk;
 };
 
+/* sockaddr: the kernel-internal generic socket address (the LSM
+ * socket_connect / unix_stream_connect hooks pass it). UAPI
+ * <linux/socket.h> deliberately does not define it; its layout
+ * (sa_family at offset 0, 14 opaque data bytes) has been ABI-stable
+ * since 4.2BSD, so restating it here is safe. Only sa_family is ever
+ * read generically; family-specific casts go through the UAPI
+ * sockaddr_in/sockaddr_in6 definitions. */
+struct sockaddr {
+	__u16 sa_family;
+	char sa_data[14];
+};
+
 #ifndef BPF_NO_PRESERVE_ACCESS_INDEX
 #pragma clang attribute pop
 #endif

@@ -76,6 +76,12 @@ jobs:
           # hard failure — a harness that silently skips generation would
           # go green without testing anything (the hollow-gate trap).
           go generate ./internal/bpf
+          # Assert generation actually produced bindings: `go generate`
+          # exits 0 having done NOTHING if the directive file is excluded
+          # by build constraints (this bit us: gen.go was `//go:build
+          # ignore`-tagged and generate silently skipped it).
+          ls internal/bpf/*_bpfel.go >/dev/null 2>&1 || {
+            echo "go generate produced no *_bpfel.go bindings — generation silently no-opped"; exit 1; }
           # Compile (do NOT run) the root+kernel harness into a static
           # binary the VM can execute. rana_bpf_generated unlocks the real
           # NewLoader attach path; bpf_harness unlocks the kernel tests

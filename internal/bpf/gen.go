@@ -1,9 +1,14 @@
-//go:build ignore
-
-// Package bpf's code generation entry point. This file is never compiled
-// as part of the build (the "ignore" tag excludes it from every build and
-// from `go test`); it exists solely so `go generate ./internal/bpf` finds
-// the bpf2go directives below.
+// This file is the package's code-generation entry point: comments and
+// bpf2go directives only, no code. It deliberately carries NO build
+// constraint: `go generate` applies build constraints when scanning for
+// directives, so tagging this file `//go:build ignore` (the
+// obvious-looking choice for a "generation-only" file) makes
+// `go generate ./internal/bpf` silently find nothing and succeed having
+// generated nothing. That exact failure mode shipped once — the
+// multi-kernel harness compiled against never-generated bindings and
+// died with `undefined: loadRanaExec` — so the tag must stay absent, and
+// ebpf-kernels.yml additionally asserts the *_bpfel.go files exist after
+// generating (defense in depth).
 //
 // CI (not `go test`) runs `go generate ./internal/bpf`, which shells out
 // to `bpf2go`, which shells out to `clang -target bpf`. clang is NOT
@@ -21,6 +26,7 @@
 // group below, embedded as CO-RE objects — no clang is required at
 // runtime after generation; the loader (loader.go) only needs the
 // generated Go+embedded-object pairs and github.com/cilium/ebpf.
+
 package bpf
 
 // NOTE: -cflags deliberately does NOT hardcode -D__TARGET_ARCH_x86 (or any

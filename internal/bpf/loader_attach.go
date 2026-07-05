@@ -21,7 +21,7 @@ package bpf
 //	ranaNet:    cgroup/{connect4,connect6,sendmsg4,sendmsg6}
 //	                                                    -> link.AttachCgroup
 //	            fentry/unix_stream_connect,
-//	            fentry/inet_sock_set_state              -> link.AttachTracing
+//	            tp_btf/inet_sock_set_state              -> link.AttachTracing
 //	            lsm/socket_connect (TierEnhanced+)      -> link.AttachLSM
 //	ranaFs:     fentry/security_{file_open,path_unlink,path_rename,
 //	            path_mkdir,path_link} + fentry/vfs_truncate

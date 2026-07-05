@@ -214,13 +214,16 @@ int BPF_PROG(rana_unix_connect, struct socket *sock, struct sockaddr *addr,
 }
 
 /*
- * fentry inet_sock_set_state: flow-close accounting (net.flow_close,
- * kind=8). Only emits on transition into TCP_CLOSE; byte counters come
- * from the sock's tcp_info-equivalent fields where CO-RE-relocatable,
- * else 0 (never fatal — a best-effort accounting field, not an
- * attribution-critical one per D7).
+ * tp_btf inet_sock_set_state: flow-close accounting (net.flow_close,
+ * kind=8). inet_sock_set_state is a TRACEPOINT (its TP_PROTO is exactly
+ * this argument list), not a kernel function — an fentry SEC here would
+ * find no BTF func to attach to and fail at load. Only emits on
+ * transition into TCP_CLOSE; byte counters come from the sock's
+ * tcp_info-equivalent fields where CO-RE-relocatable, else 0 (never
+ * fatal — a best-effort accounting field, not an attribution-critical
+ * one per D7).
  */
-SEC("fentry/inet_sock_set_state")
+SEC("tp_btf/inet_sock_set_state")
 int BPF_PROG(rana_flow_close, struct sock *sk, int oldstate, int newstate)
 {
 	#define RANA_TCP_CLOSE 7

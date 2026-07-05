@@ -19,12 +19,11 @@
 #include <bpf/bpf_endian.h> /* bpf_htons/bpf_ntohs for the cgroup_skb DNS hook */
 #include "records.h"
 
-/* rana_barrier_var: pin a variable's current value in its register so the
- * compiler can neither reload it from (possibly-aliased) map memory nor
- * reorder it across helper calls — the canonical libbpf `barrier_var`
- * idiom. Used wherever a bounds-clamped value must SURVIVE to its use
- * site for the verifier to accept the access (see rana_resolve_path). */
-#define rana_barrier_var(var) asm volatile("" : "+r"(var))
+/* RANA_COMP_MAX: per-path-component copy window (NAME_MAX + NUL). The
+ * resolve-path emit loop guards and copies in units of this CONSTANT so
+ * every verifier-visible bound is constant-vs-constant (see the design
+ * note in rana_resolve_path). */
+#define RANA_COMP_MAX 256
 
 #ifndef true
 #define true 1
@@ -112,7 +111,7 @@ struct {
 } rana_sensitive_inodes SEC(".maps");
 
 /* rana_scratch: per-CPU scratch for intermediates too large for the
- * 512-byte BPF stack (the resolve-path component stack is 48*16=768B;
+ * 512-byte BPF stack (the resolve-path component stack is 48*8=384B;
  * the fs pre-match path staging is RANA_CAP_FSOP_PATH=2048B — both blew
  * the stack limit when declared as locals). Safe to share across the
  * programs that use it: they are all process-context tp_btf/fentry hooks
@@ -120,10 +119,17 @@ struct {
  * is reachable from inside another); the one softirq-context program
  * (cgroup_skb DNS) never touches this scratch. Sequential uses within a
  * single invocation (exe_path then cwd; staging then copy-out) each
- * consume the scratch before the next begins. */
+ * consume the scratch before the next begins.
+ *
+ * comps stores only the component NAME pointers (dentry names are
+ * NUL-terminated; the emit loop reads them with a constant-size
+ * bpf_probe_read_kernel_str, so qstr.len is never needed) — storing full
+ * qstrs and using their len made the emit loop depend on a
+ * variable-to-variable bound (clen <= space) the verifier does not
+ * track, failing loads on every kernel. */
 struct rana_scratch {
-	struct qstr comps[RANA_MAX_PATH_COMPONENTS]; /* rana_resolve_path walk */
-	__u8 path_buf[RANA_CAP_FSOP_PATH];           /* rana_fs pre-match staging */
+	const unsigned char *comps[RANA_MAX_PATH_COMPONENTS]; /* rana_resolve_path walk */
+	__u8 path_buf[RANA_CAP_FSOP_PATH];                    /* rana_fs pre-match staging */
 };
 
 /* The value is declared by SIZE, not type: struct rana_scratch embeds
@@ -207,16 +213,15 @@ static __always_inline int rana_pid_in_session(__u32 pid, __u64 *home_cgid)
  */
 static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, int out_cap)
 {
-	if (!dentry || !out || out_cap <= 0)
-		return 0;
+	if (!dentry || !out || out_cap <= RANA_COMP_MAX + 2)
+		return 0; /* every real caller passes >= 1024; see RANA_COMP_MAX */
 
-	/* Scratch pointers to each component's qstr, nearest-leaf first —
-	 * held in the per-CPU scratch map, not the stack (768B > the 512B
-	 * BPF stack limit). */
+	/* Scratch pointers to each component's name, nearest-leaf first —
+	 * held in the per-CPU scratch map, not the stack (384B against the
+	 * 512B BPF stack limit, alongside the caller's own locals). */
 	struct rana_scratch *scratch = rana_scratch();
 	if (!scratch)
 		return 0;
-	struct qstr *comps = scratch->comps;
 	int n = 0;
 
 	struct dentry *d = dentry;
@@ -229,8 +234,7 @@ static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, i
 			/* reached a mount/filesystem root */
 			break;
 		}
-		comps[n].name = BPF_CORE_READ(d, d_name.name);
-		comps[n].len = BPF_CORE_READ(d, d_name.len);
+		scratch->comps[n] = BPF_CORE_READ(d, d_name.name);
 		n++;
 		d = parent;
 	}
@@ -238,53 +242,46 @@ static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, i
 	/* Emit root-to-leaf: iterate comps[] in reverse, writing "/" + name
 	 * for each, bounded by out_cap.
 	 *
-	 * Verifier note (learned from a real 5.15 load rejection, "R2 invalid
-	 * mem access 'inv'"): comps lives in MAP memory, and `out` (ringbuf
-	 * or the same scratch map) may alias it as far as the compiler
-	 * knows — so after the bpf_probe_read_kernel call it is free to
-	 * RELOAD comps[i].len, replacing the carefully clamped register with
-	 * a fresh, unbounded map value; `off += clen` then loses its bounds
-	 * and the next byte store is unprovable. rana_barrier_var pins the
-	 * clamped value in its register (the canonical libbpf idiom), and
-	 * `off` is re-bounded at the top of every iteration so the verifier
-	 * re-learns the invariant regardless of what the previous iteration
-	 * did. */
+	 * Verifier design (learned from real 5.15/6.x load rejections):
+	 * every bound here is a comparison against a COMPILE-TIME CONSTANT
+	 * (out_cap is constant at each inlined call site; RANA_COMP_MAX is a
+	 * macro), and the per-component copy uses a CONSTANT maximum size
+	 * with bpf_probe_read_kernel_str. The previous shape — clamping a
+	 * length loaded from map memory against remaining space — depended
+	 * on a variable-to-variable relation (clen <= space) the verifier
+	 * does not track, and on clamped registers surviving helper calls
+	 * without being reloaded from (possibly-aliased) map memory; it was
+	 * rejected on every kernel. Constants on both sides of every
+	 * comparison leave nothing to lose track of. */
 	int off = 0;
 	#pragma unroll
 	for (int i = RANA_MAX_PATH_COMPONENTS - 1; i >= 0; i--) {
 		if (i >= n)
 			continue;
-		if (off < 0 || off >= out_cap - 1)
+		/* '/' plus a full component must provably fit. */
+		if (off < 0 || off > out_cap - RANA_COMP_MAX - 2)
 			break;
 		out[off] = '/';
 		off++;
 
-		__u32 clen = comps[i].len;
-		const unsigned char *name = comps[i].name;
-		rana_barrier_var(clen);
-		if (clen > 255)
-			clen = 255; /* NAME_MAX bound; guards the read size */
-
-		long space = out_cap - off - 1;
-		if (space <= 0)
-			break;
-		if ((long)clen > space)
-			clen = (__u32)space;
-		rana_barrier_var(clen);
-
-		if (name && clen > 0) {
-			if (bpf_probe_read_kernel(out + off, clen, name) == 0)
-				off += clen;
-		}
+		const unsigned char *name = scratch->comps[i];
+		if (!name)
+			continue;
+		/* Constant-size bounded copy; dentry names are NUL-terminated.
+		 * Returns bytes written INCLUDING the NUL (>=1), which the next
+		 * component's '/' (or the final terminator) overwrites. */
+		long l = bpf_probe_read_kernel_str(out + off, RANA_COMP_MAX, name);
+		if (l > 1)
+			off += l - 1;
 	}
 
 	if (off < 0)
 		off = 0;
-	if (off == 0 && out_cap > 0) {
+	if (off == 0) {
 		out[0] = '/';
 		off = 1;
 	}
-	if (off > 0 && off < out_cap)
+	if (off < out_cap)
 		out[off] = 0;
 	return off;
 }

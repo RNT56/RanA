@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
 
 	"github.com/RNT56/RanA/internal/collector"
@@ -109,14 +110,19 @@ func drainEvents(t *testing.T, rd *ringbuf.Reader, timeout time.Duration, fn fun
 }
 
 // mustNewLoader constructs the loader, failing with the FULL verifier
-// log on a load rejection (%+v on a cilium/ebpf VerifierError prints
-// every line; %v truncates — and the truncated tail is exactly where the
-// rejected instruction's context lives).
+// log on a load rejection. The VerifierError must be unwrapped with
+// errors.As first: fmt.Errorf wrappers don't forward fmt.Formatter, so
+// %+v on the wrapped chain still truncates — and the truncated tail is
+// exactly where the rejected instruction's context lives.
 func mustNewLoader(t *testing.T) (*Loader, *GapDescriptor) {
 	t.Helper()
 	loader, gap, err := NewLoader(AttachOptions{})
 	if err != nil {
-		t.Fatalf("NewLoader: %+v", err)
+		var verr *ebpf.VerifierError
+		if errors.As(err, &verr) {
+			t.Fatalf("NewLoader: %v\n--- full verifier log ---\n%+v", err, verr)
+		}
+		t.Fatalf("NewLoader: %v", err)
 	}
 	return loader, gap
 }

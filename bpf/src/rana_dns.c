@@ -110,11 +110,20 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 		__u8 label_len;
 		if (rana_read_u8(c, &label_len) < 0)
 			return -1;
-		if (label_len == 0)
+		/* Copy to a pinned register FIRST, then range-check the copy
+		 * that actually feeds the size argument: label_len lives in a
+		 * helper-written stack slot the verifier tracks as unknown, so
+		 * a branch on one loaded copy does not narrow a later reload —
+		 * the verifier rejected the call with "R4 invalid zero-sized
+		 * read: u64=[0,63]" (the ==0 branch's narrowing lost). The
+		 * barrier guarantees the checked register IS the call arg. */
+		__u32 llen = label_len;
+		rana_barrier_var(llen);
+		if (llen == 0)
 			break; /* root label: end of name */
-		if (label_len & 0xC0)
+		if (llen & 0xC0)
 			return -1; /* compression pointer: not followed, see above */
-		if (label_len > RANA_DNS_MAX_LABEL)
+		if (llen > RANA_DNS_MAX_LABEL)
 			return -1;
 
 		/* '.' plus a max-size label must provably fit (constant
@@ -126,10 +135,10 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 			out_off++;
 		}
 
-		if (bpf_skb_load_bytes(c->skb, c->off, out + out_off, label_len) < 0)
+		if (bpf_skb_load_bytes(c->skb, c->off, out + out_off, llen) < 0)
 			return -1;
-		c->off += label_len;
-		out_off += label_len;
+		c->off += llen;
+		out_off += llen;
 	}
 	if (out_off < 0)
 		out_off = 0;

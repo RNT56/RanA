@@ -34,10 +34,10 @@ It never reads prompts or completions. It records **effects, not thoughts**.
 > RanA is **alpha**. Here is exactly where it stands, because in a security tool candor is the point:
 >
 > - ✅ **The trust core is solid and gate-tested** &mdash; the pure-Go ledger, hash chain, Ed25519 signing, redaction pipeline, canonical encoding, wire protocol, profile engine, alerts, the timeline UI, the standalone verifier, and the `rana-mcp` server all build and pass `go test -race`, with regression gates for throughput (G1), redaction recall/leak-freedom (G4), and chain-mutation detection (G5).
-> - 🚧 **Live capture is being brought up in CI.** The eBPF collector (the kernel-truth pillar) and the macOS Linux-guest image compile/build in CI but have **not yet run end-to-end on a live kernel** &mdash; that is the current work, and it is what turns "built" into "records." Until it is green, no agent has been recorded end-to-end.
-> - 🚧 **Marker emitters** for 7 agent frameworks are written and loopback-tested but not yet validated against the live frameworks.
+> - ✅ **Kernel capture is proven on real kernels.** A CI harness boots VMs for kernels **5.15, 6.1, 6.6, and bpf-next** and, on every one of them: loads and attaches all five eBPF program groups, records a cgroup-entered child's `exec` / file writes / watchlisted-credential reads **with correct session attribution**, proves the in-kernel filter emits *nothing* for unregistered processes, and survives a collector restart with a first-class `gap` event. The macOS Linux-guest image also builds reproducibly in CI.
+> - 🚧 **End-user wiring is the current work.** The daemon⇄session-service registration protocol, the packaged adopt/run flows on real machines, and validating the 7 marker emitters against their live agent frameworks &mdash; the parts that turn a proven collector into the one-command experience below.
 >
-> **Do not rely on RanA for anything that matters yet.** Watch the [Actions tab](https://github.com/RNT56/RanA/actions) for the eBPF/guest milestone. And before you rely on it *ever*, read [`LIMITS.md`](./LIMITS.md).
+> **Do not rely on RanA for anything that matters yet.** And before you rely on it *ever*, read [`LIMITS.md`](./LIMITS.md).
 
 ```text
 Already running OpenClaw?

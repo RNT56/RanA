@@ -167,7 +167,14 @@ int rana_dns_egress(struct __sk_buff *skb)
 	if (bpf_ntohs(udp->dest) != RANA_DNS_PORT)
 		return 1;
 
-	__u64 cgid = rana_task_cgid((struct task_struct *)bpf_get_current_task_btf());
+	/* Attribution comes from the SOCKET's cgroup (bpf_skb_cgroup_id),
+	 * never from `current`: cgroup_skb egress runs in softirq context,
+	 * where the current task is whatever happened to be interrupted —
+	 * current-task helpers are both unavailable to this program type
+	 * (the load failed with "unknown func bpf_get_current_pid_tgid")
+	 * and, where they exist, WRONG attribution. The skb's socket-owner
+	 * cgroup is the kernel truth (P1). */
+	__u64 cgid = bpf_skb_cgroup_id(skb);
 	if (!rana_cgid_in_session(cgid))
 		return 1;
 
@@ -200,7 +207,11 @@ int rana_dns_egress(struct __sk_buff *skb)
 
 	rec->version = RANA_RECORD_VERSION;
 	rec->kind = RANA_KIND_DNS;
-	rec->pid = bpf_get_current_pid_tgid() >> 32;
+	rec->pid = 0; /* softirq: no meaningful current task (see the cgid
+		       * note above). 0 = honestly unknown; the collector's
+		       * DNS join window correlates the query to its flow
+		       * (and thus pid) userspace-side — never fabricated
+		       * here (P5's no-guessing rule). */
 	rec->cgid = cgid;
 	rec->ts_mono = bpf_ktime_get_ns();
 	rec->ts_wall = bpf_ktime_get_boot_ns();

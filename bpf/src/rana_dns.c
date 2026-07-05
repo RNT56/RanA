@@ -61,13 +61,17 @@ struct rana_dns_cursor {
  * fields (never TXT/MX/other rdata, per the file header). */
 static __always_inline int rana_read_u8(struct rana_dns_cursor *c, __u8 *out)
 {
-	/* Check and dereference the SAME derived pointer: the verifier's
-	 * packet range attaches to the register the compare ran on, so
-	 * re-deriving data+off after the branch (as a naive two-expression
-	 * form compiles to) yields a fresh pointer with range 0 — a real
-	 * 5.15 verifier rejected exactly that ("R1 offset is outside of
-	 * the packet"). */
+	/* Check and dereference the SAME derived pointer, and PIN it: the
+	 * verifier's packet range attaches to a specific register id, and
+	 * without the barrier clang CSEs consecutive cursor reads onto one
+	 * stale base — the bounds compares run on the freshly derived
+	 * pointers while the loads go through the old id with range 0. A
+	 * real verifier log showed exactly that: checks on pkt id=42/43,
+	 * then `r0 = *(u8 *)(r1 +1)` with R1(id=39, r=0) rejected. The
+	 * barrier makes p opaque, forcing every load through the register
+	 * the compare blessed. */
 	__u8 *p = (__u8 *)c->data + c->off;
+	rana_barrier_var(p);
 	if ((void *)(p + 1) > c->data_end)
 		return -1;
 	*out = *p;
@@ -77,8 +81,9 @@ static __always_inline int rana_read_u8(struct rana_dns_cursor *c, __u8 *out)
 
 static __always_inline int rana_read_u16(struct rana_dns_cursor *c, __u16 *out)
 {
-	/* Same single-pointer-lineage rule as rana_read_u8. */
+	/* Same single-pointer-lineage + pin rule as rana_read_u8. */
 	__u8 *p = (__u8 *)c->data + c->off;
+	rana_barrier_var(p);
 	if ((void *)(p + 2) > c->data_end)
 		return -1;
 	*out = ((__u16)p[0] << 8) | p[1];

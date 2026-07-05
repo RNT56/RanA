@@ -37,21 +37,29 @@ package bpf
 // shared -cflags string would silently force x86 register-argument shape
 // onto the arm64 build too, corrupting every fentry/BPF_PROG argument read
 // (task_struct*, dentry*, etc.) on arm64 — do not reintroduce it.
+//
+// The two hardcoded /usr/include/<multiarch>-linux-gnu dirs cover
+// Debian/Ubuntu's multiarch split: <linux/types.h> includes <asm/types.h>,
+// which lives in the per-arch dir that clang's bpf target does not search
+// by default. Both dirs are listed unconditionally — clang silently
+// ignores -I dirs that don't exist, and the asm-generic content behind
+// them is identical for everything these programs use (real struct
+// layouts come from CO-RE relocation at load, never from these headers).
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf" -target amd64,arm64 -type rana_exec_record -type rana_fork_record -type rana_exit_record ranaExec ../../bpf/src/rana_exec.c -- -I../../bpf/src
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf -I/usr/include/x86_64-linux-gnu -I/usr/include/aarch64-linux-gnu" -target amd64,arm64 -type rana_exec_record -type rana_fork_record -type rana_exit_record ranaExec ../../bpf/src/rana_exec.c -- -I../../bpf/src
 
 // ranaNet also carries rana_socket_connect (SEC("lsm/socket_connect")),
 // the io_uring-coverage LSM hook added for Tier-2 (loader_tier.go's
 // WantedPrograms gates its attachment to TierEnhanced+); no new -type flag
 // is needed since it reuses rana_connect_record already listed below.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf" -target amd64,arm64 -type rana_connect_record -type rana_unix_connect_record -type rana_flow_close_record ranaNet ../../bpf/src/rana_net.c -- -I../../bpf/src
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf -I/usr/include/x86_64-linux-gnu -I/usr/include/aarch64-linux-gnu" -target amd64,arm64 -type rana_connect_record -type rana_unix_connect_record -type rana_flow_close_record ranaNet ../../bpf/src/rana_net.c -- -I../../bpf/src
 
 // ranaFs also carries rana_path_link (SEC("fentry/security_path_link")),
 // the hardlink-watchlist re-pin hook added for Tier-2; no new -type flag
 // is needed since it writes to rana_sensitive_inodes (already declared in
 // common.h) and emits no ring-buffer record of its own.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf" -target amd64,arm64 -type rana_fsop_record ranaFs ../../bpf/src/rana_fs.c -- -I../../bpf/src
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf -I/usr/include/x86_64-linux-gnu -I/usr/include/aarch64-linux-gnu" -target amd64,arm64 -type rana_fsop_record ranaFs ../../bpf/src/rana_fs.c -- -I../../bpf/src
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf" -target amd64,arm64 -type rana_dns_record ranaDns ../../bpf/src/rana_dns.c -- -I../../bpf/src
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf -I/usr/include/x86_64-linux-gnu -I/usr/include/aarch64-linux-gnu" -target amd64,arm64 -type rana_dns_record ranaDns ../../bpf/src/rana_dns.c -- -I../../bpf/src
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf" -target amd64,arm64 -type rana_migration_record ranaEscape ../../bpf/src/rana_escape.c -- -I../../bpf/src
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -target bpf -I/usr/include/x86_64-linux-gnu -I/usr/include/aarch64-linux-gnu" -target amd64,arm64 -type rana_migration_record ranaEscape ../../bpf/src/rana_escape.c -- -I../../bpf/src

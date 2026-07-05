@@ -116,14 +116,16 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 		__u8 label_len;
 		if (rana_read_u8(c, &label_len) < 0)
 			return -1;
-		/* Copy to a pinned register FIRST, then range-check the copy
-		 * that actually feeds the size argument: label_len lives in a
-		 * helper-written stack slot the verifier tracks as unknown, so
-		 * a branch on one loaded copy does not narrow a later reload —
-		 * the verifier rejected the call with "R4 invalid zero-sized
-		 * read: u64=[0,63]" (the ==0 branch's narrowing lost). The
-		 * barrier guarantees the checked register IS the call arg. */
-		__u32 llen = label_len;
+		/* Copy to a pinned 8-BYTE register first, then range-check the
+		 * copy that actually feeds the size argument: label_len lives
+		 * in a helper-written stack slot the verifier tracks as
+		 * unknown, so a branch on one loaded copy does not narrow a
+		 * later reload ("R4 invalid zero-sized read"); and a __u32
+		 * copy re-broke it identically — 5.15 tracks only 8-byte
+		 * scalar spills, so the u32 spilled across the dot-write block
+		 * and reloaded as [0,255] at the call (rule: loop-carried /
+		 * call-feeding scalars are `long`). */
+		long llen = label_len;
 		rana_barrier_var(llen);
 		if (llen == 0)
 			break; /* root label: end of name */
@@ -148,6 +150,12 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 			out_off++;
 		}
 
+		/* Re-establish the size bound on the exact value feeding the
+		 * call, after any spill/reload the '.'-write block caused. */
+		llen &= 0x3f;
+		rana_barrier_var(llen);
+		if (llen == 0)
+			break;
 		if (bpf_skb_load_bytes(c->skb, c->off, out + out_off, llen) < 0)
 			return -1;
 		c->off += llen;

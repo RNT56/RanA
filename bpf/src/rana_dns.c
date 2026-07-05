@@ -105,7 +105,13 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 	 * with ONE bpf_skb_load_bytes of label_len bytes (verifier-bounded
 	 * [1,63]) instead of byte-at-a-time, so the loop body is a handful
 	 * of instructions. */
-	int out_off = 0;
+	/* `long`, not int: the non-unrolled loop spills out_off across
+	 * iterations, and a 5.15 verifier tracks only 8-byte scalar spills —
+	 * a 4-byte int spill reloads as unknown (min negative), which
+	 * rejected the dst argument ("R3 min value is outside of the
+	 * allowed memory range"). The mask before each use (below) is the
+	 * belt to this suspender. */
+	long out_off = 0;
 	for (int i = 0; i < RANA_DNS_MAX_NAME_WALK; i++) {
 		__u8 label_len;
 		if (rana_read_u8(c, &label_len) < 0)
@@ -126,9 +132,16 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 		if (llen > RANA_DNS_MAX_LABEL)
 			return -1;
 
-		/* '.' plus a max-size label must provably fit (constant
-		 * compare; cap is a constant at the single call site). */
-		if (out_off < 0 || out_off > cap - RANA_DNS_MAX_LABEL - 2)
+		/* Mask + pin + constant compare (the rana_resolve_path
+		 * discipline): the AND gives the verifier an exact var_off
+		 * regardless of spill history, the barrier makes THIS value
+		 * the one the pointer is formed from, and '.' plus a max-size
+		 * label then provably fits (cap is 255 at the single call
+		 * site; the 0xFF mask is a runtime no-op for the same
+		 * reason). */
+		out_off &= 0xFF;
+		rana_barrier_var(out_off);
+		if (out_off > cap - RANA_DNS_MAX_LABEL - 2)
 			break;
 		if (out_off > 0) {
 			out[out_off] = '.';
@@ -140,8 +153,8 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 		c->off += llen;
 		out_off += llen;
 	}
-	if (out_off < 0)
-		out_off = 0;
+	out_off &= 0xFF;
+	rana_barrier_var(out_off);
 	if (out_off < cap)
 		out[out_off] = 0;
 	return out_off;

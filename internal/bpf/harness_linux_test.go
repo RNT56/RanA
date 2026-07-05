@@ -143,8 +143,13 @@ func TestKernelHarness_EndToEnd(t *testing.T) {
 	}
 	defer loader.UnregisterSession(cgid)
 
-	// A watchlisted "credential" file for the D9 sensitive-read leg.
-	secret := "/tmp/rana-harness-secret"
+	// A watchlisted "credential" file for the D9 sensitive-read leg. On
+	// the ROOT mount deliberately: the in-kernel resolve walk follows
+	// d_parent within one mount (mount-relative paths — LIMITS.md), so a
+	// tmpfs /tmp file would resolve as /rana-harness-secret and the
+	// exact-length prefix lookup would miss. Registering and creating on
+	// the root fs keeps this test about capture, not mount semantics.
+	secret := "/rana-harness-secret"
 	if err := os.WriteFile(secret, []byte("not-a-real-secret\n"), 0o600); err != nil {
 		t.Fatalf("writing watchlisted file: %v", err)
 	}

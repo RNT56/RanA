@@ -109,7 +109,11 @@ jobs:
             uname -a
             mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
             mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
-            cd /host
-            # RANA_BPF_TESTS gates the attach/harness tests inside the test
-            # binary so they only run where a real kernel is present (here).
-            RANA_BPF_TESTS=1 ./bpf-harness.test -test.v
+            # Run from the package directory: the package's source-grep
+            # tests (invariants, records-header cross-checks) read
+            # ../../bpf/src relative to internal/bpf, exactly as `go test`
+            # would. RANA_BPF_TESTS gates the attach/harness tests inside
+            # the test binary so they only run where a real kernel is
+            # present (here).
+            cd /host/internal/bpf
+            RANA_BPF_TESTS=1 /host/bpf-harness.test -test.v

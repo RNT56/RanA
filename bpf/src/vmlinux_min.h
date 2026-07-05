@@ -47,7 +47,6 @@ struct task_struct;
 struct fs_struct;
 struct cred;
 struct cgroup;
-struct cgroup_subsys_state;
 struct css_set;
 struct qstr;
 struct dentry;
@@ -111,23 +110,24 @@ struct cred {
 
 /* cgroup plumbing: only what's needed to read a task's cgroup id (cgid)
  * for the default (v2) hierarchy, per D6 (one cgroup v2 leaf = one
- * session). */
-struct cgroup {
-	__u64 kn_id; /* mirrors cgroup->kn->id via a flattened CO-RE read
-	              * helper in the .c files (BPF_CORE_READ chases
-	              * ->kn->id); declared flat here only to document the
-	              * final integer this ultimately resolves to. */
+ * session). The chain is css_set->dfl_cgrp->kn->id — the same one
+ * bpf_get_current_cgroup_id() walks. Every field here must exist BY NAME
+ * in kernel BTF: a flattened invention (an earlier `kn_id` field) is
+ * unresolvable by CO-RE and poisons the instruction, failing the whole
+ * program at load with "bad CO-RE relocation". dfl_cgrp (not
+ * subsys[0]->cgroup) is deliberate: on hybrid v1/v2 hosts subsys[0]'s
+ * css can belong to a v1 hierarchy whose id does NOT match the cgroupfs
+ * inode userspace registers as the session cgid. */
+struct kernfs_node {
+	__u64 id;
 };
 
-struct cgroup_subsys_state {
-	struct cgroup *cgroup;
+struct cgroup {
+	struct kernfs_node *kn;
 };
 
 struct css_set {
-	struct cgroup_subsys_state *subsys[1]; /* index 0 is enough: we only
-	                                         * ever read subsys[0]->cgroup
-	                                         * for the unified (v2)
-	                                         * hierarchy id. */
+	struct cgroup *dfl_cgrp;
 };
 
 /* dentry/path/mount: bounded resolved-path walk (D7) for file ops,

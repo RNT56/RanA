@@ -139,21 +139,20 @@ static __always_inline struct rana_scratch *rana_scratch(void)
 }
 
 /* Returns the cgroup id (cgid) of the default/unified (v2) hierarchy for
- * the given task, via CO-RE-relocated field reads. This is the single
- * source of truth for "which cgroup is this task in" used by every
- * program's session filter. */
+ * the given task, via CO-RE-relocated field reads — the
+ * css_set->dfl_cgrp->kn->id chain bpf_get_current_cgroup_id() walks
+ * (dfl_cgrp, not subsys[0]: see vmlinux_min.h's cgroup note). This is
+ * the single source of truth for "which cgroup is this task in" used by
+ * every program's session filter. */
 static __always_inline __u64 rana_task_cgid(struct task_struct *task)
 {
 	struct css_set *cgroups = BPF_CORE_READ(task, cgroups);
 	if (!cgroups)
 		return 0;
-	struct cgroup_subsys_state *css = BPF_CORE_READ(cgroups, subsys[0]);
-	if (!css)
-		return 0;
-	struct cgroup *cgrp = BPF_CORE_READ(css, cgroup);
+	struct cgroup *cgrp = BPF_CORE_READ(cgroups, dfl_cgrp);
 	if (!cgrp)
 		return 0;
-	return BPF_CORE_READ(cgrp, kn_id);
+	return BPF_CORE_READ(cgrp, kn, id);
 }
 
 /* Returns 1 iff cgid belongs to a session RanA is recording. Session

@@ -56,7 +56,7 @@ int rana_cgroup_attach_task(struct bpf_raw_tracepoint_args *ctx)
 			   * hook, like every other, only ever reports on
 			   * pids RanA is already recording). */
 
-	__u64 to_cgid = dst_cgrp ? BPF_CORE_READ(dst_cgrp, kn_id) : 0;
+	__u64 to_cgid = dst_cgrp ? BPF_CORE_READ(dst_cgrp, kn, id) : 0;
 	if (to_cgid == home_cgid)
 		return 0; /* moving within its own session cgroup (or a
 			   * no-op attach): not a migration worth reporting. */

@@ -91,6 +91,11 @@ jobs:
           image-version: ${{ matrix.kernel }}
           host-mount: ./
           install-dependencies: "true"
+          # REQUIRED: the action roots its image/kernel dirs at
+          # "<images-folder-parent>/images/..."; left empty they land at
+          # filesystem root and the lvh CLI's pull fails with "invalid
+          # reference format". Every cilium consumer passes /tmp.
+          images-folder-parent: "/tmp"
           cmd: |
             set -e
             uname -a

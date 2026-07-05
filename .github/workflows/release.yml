@@ -41,6 +41,23 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
+      # ranad embeds the eBPF CO-RE objects (bpf2go), so a capture-capable
+      # release MUST generate them and build ranad with rana_bpf_generated —
+      # otherwise the released daemon returns ErrBPFNotGenerated and records
+      # nothing. clang/llvm are needed only at generate time; the embedded
+      # per-arch .o objects then cross-compile into ranad with no clang at
+      # build time.
+      - name: install clang / llvm (BPF codegen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev
+
+      - name: generate eBPF CO-RE objects (amd64 + arm64, embedded)
+        run: |
+          go generate ./internal/bpf
+          ls internal/bpf/*_bpfel.go >/dev/null 2>&1 || {
+            echo "go generate produced no bindings — cannot ship a capture-capable ranad"; exit 1; }
+
       - name: build static Linux binaries (amd64 + arm64)
         env:
           CGO_ENABLED: "0"
@@ -53,8 +70,12 @@ jobs:
             for cmd in rana ranad rana-verify-standalone rana-mcp; do
               if [ -d "./cmd/$cmd" ]; then
                 out="dist/${cmd}-linux-${arch}"
-                echo "building $out"
-                GOARCH="$arch" go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" \
+                # ranad alone needs the generated eBPF attach path; the other
+                # binaries are pure Go and stay strictly reproducible.
+                tags=""
+                if [ "$cmd" = "ranad" ]; then tags="-tags rana_bpf_generated"; fi
+                echo "building $out $tags"
+                GOARCH="$arch" go build $tags -trimpath -buildvcs=false -ldflags="-s -w -buildid=" \
                   -o "$out" "./cmd/$cmd"
               else
                 echo "skip $cmd: ./cmd/$cmd not present yet"
@@ -155,15 +176,34 @@ jobs:
             cat dist/sbom-govm.txt || true
           fi
 
-      - name: create DRAFT release and attach artifacts
+      # Release policy: a pre-release tag (contains a hyphen, e.g.
+      # v0.1.0-alpha.1) publishes as a PRERELEASE so it is installable for
+      # testing (RANA_VERSION=<tag> sh get-rana.sh) while `latest` still
+      # points at no stable release. A plain v-tag stays a DRAFT for human
+      # review before publishing a stable release.
+      - name: compute release flags
+        id: relflags
+        run: |
+          if printf '%s' "${GITHUB_REF_NAME}" | grep -q '-'; then
+            echo "draft=false"      >> "$GITHUB_OUTPUT"
+            echo "prerelease=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "draft=true"       >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: create release and attach artifacts
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: ${{ steps.relflags.outputs.draft }}
+          prerelease: ${{ steps.relflags.outputs.prerelease }}
           name: RanA ${{ needs.build.outputs.version }}
           tag_name: ${{ needs.build.outputs.version }}
           fail_on_unmatched_files: false
           body: |
-            RanA ${{ needs.build.outputs.version }} — draft.
+            RanA ${{ needs.build.outputs.version }}
+
+            **⚠ Alpha / under active development. Do not rely on this for anything that matters.** Read [`LIMITS.md`](https://github.com/RNT56/RanA/blob/main/LIMITS.md) first.
 
             Verify before installing a root daemon (docs/SECURITY.md):
               * `sha256sum -c SHA256SUMS`
@@ -171,9 +211,17 @@ jobs:
                    --certificate-identity-regexp '.*' \
                    --certificate-oidc-issuer https://token.actions.githubusercontent.com <f>`
 
-            Linux binaries are reproducible pure-Go static builds (CGO_ENABLED=0,
-            -trimpath, -buildid=). The macOS host binary is codesigned/notarized
-            separately (needs Apple secrets; see docs/MACOS.md §2) and is not in
-            this draft until that job is configured.
+            **What's proven:** the eBPF collector loads, attaches, and records
+            exec / file / network / DNS with correct cgroup attribution on
+            kernels 5.15, 6.1, 6.6, and bpf-next (the `ebpf-kernels` CI gate).
+            `ranad` here is built with the generated eBPF objects embedded, so
+            it captures on a real Linux kernel (5.15+, cgroup v2); the other
+            binaries are reproducible pure-Go static builds.
+
+            **What's not here:** the macOS host binary is CGO + needs Apple
+            codesigning/notarization (Apple secrets; docs/MACOS.md §2) and is
+            not in this build. macOS recording is not yet shippable; this alpha
+            is the **Linux capture path** (native eBPF), suitable for VPS /
+            Linux-host testing.
           files: |
             dist/*

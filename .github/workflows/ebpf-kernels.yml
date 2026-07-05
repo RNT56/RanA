@@ -8,17 +8,19 @@
 # objects, and runs the harness so a CO-RE relocation that breaks on 6.1 but
 # works on 6.6 (or vice-versa) is caught.
 #
-# WHY IT IS MANUAL / NON-BLOCKING:
-#   * It needs a real kernel + root + BTF — infrastructure the pure-Go PR gate
-#     (ci.yml) deliberately does not require, and which the macOS dev host
-#     cannot run at all (LIMITS.md §8: real kernel capture is a CI concern).
-#   * It pulls prebuilt kernel images from an external registry, so it must not
-#     sit on the critical path of every PR.
-# It is therefore workflow_dispatch (run it on demand) + on pushes to main that
-# touch BPF code. It is NOT a required status check. When the eBPF objects and
-# the `bpf_harness`-tagged tests are validated green here on real kernels, this
-# can be promoted to a required gate and the compile-only check in ci.yml
-# becomes its fast-feedback front end.
+# It needs a real kernel + root + BTF — infrastructure the pure-Go PR gate
+# (ci.yml) deliberately does not require, and which the macOS dev host cannot
+# run at all — and it pulls prebuilt kernel images from an external registry.
+#
+# STATUS: PROMOTED TO A REQUIRED GATE. Having validated green across
+# 5.15/6.1/6.6/bpf-next (load, attach, capture, attribution, in-kernel
+# filtering, reattach), the four `eBPF harness (<label>)` checks are required
+# status checks on branch protection for changes to the kernel path (it runs
+# on pull_request as well as push, so the required check can actually be
+# satisfied on a PR). The compile-only `bpf compile-check` in ci.yml remains
+# the fast-feedback front end. When refreshing kernel images, bump matrix
+# `image` only — the `label` (and thus the required-check name) must stay
+# stable, or the gate silently detaches.
 name: ebpf-kernels
 
 on:
@@ -29,6 +31,20 @@ on:
       - "bpf/**"
       - "internal/bpf/**"
       - "internal/collector/**"
+      - "cmd/ranad/**"
+      - ".github/workflows/ebpf-kernels.yml"
+  # Also on PRs touching the kernel path, so this can be (and is) a
+  # REQUIRED status check: a required check that never runs on a PR would
+  # block every PR forever. The stable job names below ("eBPF harness
+  # (5.15)" …) are what branch protection matches — they must NOT embed
+  # the dated image tag, or a routine image bump would rename the check
+  # and silently break the gate.
+  pull_request:
+    paths:
+      - "bpf/**"
+      - "internal/bpf/**"
+      - "internal/collector/**"
+      - "cmd/ranad/**"
       - ".github/workflows/ebpf-kernels.yml"
 
 permissions:
@@ -40,22 +56,22 @@ concurrency:
 
 jobs:
   harness:
-    name: eBPF harness (kernel ${{ matrix.kernel }})
+    name: eBPF harness (${{ matrix.kernel.label }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         # LTS floor (5.15) through current, plus bpf-next for early warning.
-        # Date-pinned lvh-images tags (like every cilium consumer) — the
-        # moving "-main" tags break lvh v0.0.30's cached-pull name
-        # derivation ("invalid reference format"). Bump the date suffix
-        # deliberately; check quay.io/lvh-images/complexity-test for
-        # current snapshots.
+        # label = the STABLE name branch protection references; image = the
+        # date-pinned lvh-images tag (the moving "-main" tags break lvh
+        # v0.0.30's cached-pull name derivation). Bump `image` deliberately
+        # when refreshing kernels; NEVER let the dated tag leak into `label`
+        # or the required-check name changes out from under the gate.
         kernel:
-          - "5.15-20260629.014609"
-          - "6.1-20260629.014609"
-          - "6.6-20260629.014609"
-          - "bpf-next-20260629.014609"
+          - { label: "5.15", image: "5.15-20260629.014609" }
+          - { label: "6.1", image: "6.1-20260629.014609" }
+          - { label: "6.6", image: "6.6-20260629.014609" }
+          - { label: "bpf-next", image: "bpf-next-20260629.014609" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -99,12 +115,12 @@ jobs:
           CGO_ENABLED=0 go build -tags rana_bpf_generated ./cmd/ranad
           echo "cmd/ranad builds with generated eBPF bindings"
 
-      - name: boot ${{ matrix.kernel }} and run the harness as root
+      - name: boot ${{ matrix.kernel.label }} and run the harness as root
         uses: cilium/little-vm-helper@v0.0.30
         with:
-          test-name: rana-ebpf-${{ matrix.kernel }}
+          test-name: rana-ebpf-${{ matrix.kernel.label }}
           image: complexity-test
-          image-version: ${{ matrix.kernel }}
+          image-version: ${{ matrix.kernel.image }}
           host-mount: ./
           install-dependencies: "true"
           # REQUIRED: the action roots its image/kernel dirs at

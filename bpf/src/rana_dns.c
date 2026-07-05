@@ -127,7 +127,13 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 		 * call-feeding scalars are `long`). */
 		long llen = label_len;
 		rana_barrier_var(llen);
-		if (llen == 0)
+		/* `< 1`, not `== 0`: a 5.15 verifier does not raise umin on
+		 * the false branch of an EQUALITY test (boundary exclusion
+		 * landed in later kernels), so `!= 0` leaves 0 inside the
+		 * size argument's range and the helper call is rejected with
+		 * "size=0". Range compares (JLT) move umin on every supported
+		 * kernel. */
+		if (llen < 1)
 			break; /* root label: end of name */
 		if (llen & 0xC0)
 			return -1; /* compression pointer: not followed, see above */
@@ -151,10 +157,11 @@ static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out
 		}
 
 		/* Re-establish the size bound on the exact value feeding the
-		 * call, after any spill/reload the '.'-write block caused. */
+		 * call, after any spill/reload the '.'-write block caused.
+		 * `< 1` for the same 5.15 equality-narrowing reason as above. */
 		llen &= 0x3f;
 		rana_barrier_var(llen);
-		if (llen == 0)
+		if (llen < 1)
 			break;
 		if (bpf_skb_load_bytes(c->skb, c->off, out + out_off, llen) < 0)
 			return -1;

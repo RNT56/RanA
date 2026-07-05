@@ -121,11 +121,22 @@ processes is wired to its final form yet:
 
 - **`rana run` (Linux) hosts the session service and the full record→ledger→
   verify→export path is exercised end to end** (the wire→svc→ledger→verify→
-  standalone-verifier flow is race-tested). Actual kernel capture additionally
-  requires `ranad` attached with generated eBPF objects (a Linux/root/CI
-  concern, not runnable on the macOS dev host).
+  standalone-verifier flow is race-tested). Kernel capture is wired all the
+  way through: `rana run` resolves the created scope's cgid and svc announces
+  it to `ranad` over the wire (`SessionStart`), which registers it into the
+  in-kernel filter map before the child starts — and re-registers on any
+  ranad (re)connect, so either side may start first. The eBPF
+  load/attach/capture path itself is proven per-kernel by the `ebpf-kernels`
+  CI harness (5.15/6.1/6.6/bpf-next, a required merge gate); the assembled
+  `rana run`+`ranad` flow on a end-user host is what the alpha pre-releases
+  exist to shake out.
 - **Single-user by design (v1).** One root `ranad` feeding *multiple* users'
   session services by cgid→uid routing is a documented open item, not built.
+  Corollary for the cgid handshake: `ranad` trusts the uid-gated svc socket's
+  `SessionStart` and does not independently verify that the cgid's cgroup
+  belongs to that user — same-user trust, correct for v1's one-user model;
+  the multi-user design (docs/MULTIUSER.md) must add cgroup-ownership
+  verification before a system-wide ranad ships.
 - **Long-lived-daemon session state — now bounded.** `ranad`'s per-session
   rate-limit, segment-tracking, and exe-provenance state is released when svc
   reports a session ended, via a `SessionEnd` frame on the ranad↔svc wire

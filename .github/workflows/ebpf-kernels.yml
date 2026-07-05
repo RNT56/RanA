@@ -33,19 +33,18 @@ on:
       - "internal/collector/**"
       - "cmd/ranad/**"
       - ".github/workflows/ebpf-kernels.yml"
-  # Also on PRs touching the kernel path, so this can be (and is) a
-  # REQUIRED status check: a required check that never runs on a PR would
-  # block every PR forever. The stable job names below ("eBPF harness
-  # (5.15)" …) are what branch protection matches — they must NOT embed
-  # the dated image tag, or a routine image bump would rename the check
-  # and silently break the gate.
+  # On EVERY pull request (deliberately NOT path-filtered): these are
+  # REQUIRED status checks, and a required check that a path filter skips
+  # is reported as "Expected" forever, blocking the PR. Running the four
+  # kernel VMs on every PR is the price of making "the collector records on
+  # a real kernel" a merge precondition — appropriate for a kernel-truth
+  # security tool. The stable job names ("eBPF harness (5.15)" …) are what
+  # branch protection matches; they must NOT embed the dated image tag, or a
+  # routine image bump renames the check and silently detaches the gate.
+  # (If PR volume ever makes four VM boots per PR too costly, gate the
+  # matrix behind a changed-paths job and require a single always-running
+  # aggregation job instead.)
   pull_request:
-    paths:
-      - "bpf/**"
-      - "internal/bpf/**"
-      - "internal/collector/**"
-      - "cmd/ranad/**"
-      - ".github/workflows/ebpf-kernels.yml"
 
 permissions:
   contents: read

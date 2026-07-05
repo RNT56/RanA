@@ -30,6 +30,14 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+/* BTF type anchors: at -O2 clang may optimize away the debug info of
+ * pointer locals, dropping the record struct from the object's BTF and
+ * breaking bpf2go's -type collection ("looking up type ...: not
+ * found"). An unused global pointer per exported record type forces the
+ * full type into BTF regardless of optimization — the canonical
+ * libbpf-tools idiom. Never read or written at runtime. */
+const struct rana_dns_record *__rana_btf_rana_dns_record __attribute__((unused));
+
 #define RANA_DNS_PORT 53
 #define RANA_ETH_HLEN 14
 #define RANA_DNS_HDR_LEN 12

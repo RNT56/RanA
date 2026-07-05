@@ -27,6 +27,14 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+/* BTF type anchors: at -O2 clang may optimize away the debug info of
+ * pointer locals, dropping the record struct from the object's BTF and
+ * breaking bpf2go's -type collection ("looking up type ...: not
+ * found"). An unused global pointer per exported record type forces the
+ * full type into BTF regardless of optimization — the canonical
+ * libbpf-tools idiom. Never read or written at runtime. */
+const struct rana_fsop_record *__rana_btf_rana_fsop_record __attribute__((unused));
+
 /* fs.chmod is part of the D7 hook set (records.md documents FsOpChmod)
  * but has no dedicated LSM hook wired in v1; the op constant and record
  * shape exist so a future security_path_chmod/security_inode_setattr

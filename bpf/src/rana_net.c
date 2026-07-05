@@ -33,6 +33,16 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+/* BTF type anchors: at -O2 clang may optimize away the debug info of
+ * pointer locals, dropping the record struct from the object's BTF and
+ * breaking bpf2go's -type collection ("looking up type ...: not
+ * found"). An unused global pointer per exported record type forces the
+ * full type into BTF regardless of optimization — the canonical
+ * libbpf-tools idiom. Never read or written at runtime. */
+const struct rana_connect_record *__rana_btf_rana_connect_record __attribute__((unused));
+const struct rana_unix_connect_record *__rana_btf_rana_unix_connect_record __attribute__((unused));
+const struct rana_flow_close_record *__rana_btf_rana_flow_close_record __attribute__((unused));
+
 static __always_inline void rana_emit_connect(__u8 kind, __u8 proto, __u8 family,
 					       __u32 pid, __u64 cgid,
 					       const __u8 daddr[16], __u16 dport)

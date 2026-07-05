@@ -17,6 +17,16 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+/* BTF type anchors: at -O2 clang may optimize away the debug info of
+ * pointer locals, dropping the record struct from the object's BTF and
+ * breaking bpf2go's -type collection ("looking up type ...: not
+ * found"). An unused global pointer per exported record type forces the
+ * full type into BTF regardless of optimization — the canonical
+ * libbpf-tools idiom. Never read or written at runtime. */
+const struct rana_exec_record *__rana_btf_rana_exec_record __attribute__((unused));
+const struct rana_fork_record *__rana_btf_rana_fork_record __attribute__((unused));
+const struct rana_exit_record *__rana_btf_rana_exit_record __attribute__((unused));
+
 /*
  * sched_process_exec: emits proc.exec (kind=1). Runs in the context of
  * the newly-execing task, so bpf_get_current_task() is exactly the task

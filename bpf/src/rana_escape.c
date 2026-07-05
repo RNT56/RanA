@@ -26,6 +26,14 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+/* BTF type anchors: at -O2 clang may optimize away the debug info of
+ * pointer locals, dropping the record struct from the object's BTF and
+ * breaking bpf2go's -type collection ("looking up type ...: not
+ * found"). An unused global pointer per exported record type forces the
+ * full type into BTF regardless of optimization — the canonical
+ * libbpf-tools idiom. Never read or written at runtime. */
+const struct rana_migration_record *__rana_btf_rana_migration_record __attribute__((unused));
+
 /*
  * raw_tracepoint/cgroup_attach_task context: the kernel passes
  * (struct cgroup *dst_cgrp, const char *path, struct task_struct *task,

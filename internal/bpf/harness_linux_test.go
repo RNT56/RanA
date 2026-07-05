@@ -108,15 +108,25 @@ func drainEvents(t *testing.T, rd *ringbuf.Reader, timeout time.Duration, fn fun
 	}
 }
 
+// mustNewLoader constructs the loader, failing with the FULL verifier
+// log on a load rejection (%+v on a cilium/ebpf VerifierError prints
+// every line; %v truncates — and the truncated tail is exactly where the
+// rejected instruction's context lives).
+func mustNewLoader(t *testing.T) (*Loader, *GapDescriptor) {
+	t.Helper()
+	loader, gap, err := NewLoader(AttachOptions{})
+	if err != nil {
+		t.Fatalf("NewLoader: %+v", err)
+	}
+	return loader, gap
+}
+
 // TestKernelHarness_EndToEnd is the flagship real-kernel test: load,
 // attach, record a session, verify kernel-truth attribution.
 func TestKernelHarness_EndToEnd(t *testing.T) {
 	requireHarnessEnv(t)
 
-	loader, gap, err := NewLoader(AttachOptions{})
-	if err != nil {
-		t.Fatalf("NewLoader: %v", err)
-	}
+	loader, gap := mustNewLoader(t)
 	defer loader.Close()
 	t.Logf("attached at tier %v; restart gap: %v; lsm degraded: %q",
 		loader.Tier(), gap != nil, loader.LSMDegraded())
@@ -213,10 +223,7 @@ func TestKernelHarness_EndToEnd(t *testing.T) {
 func TestKernelHarness_OutOfSessionSilence(t *testing.T) {
 	requireHarnessEnv(t)
 
-	loader, _, err := NewLoader(AttachOptions{})
-	if err != nil {
-		t.Fatalf("NewLoader: %v", err)
-	}
+	loader, _ := mustNewLoader(t)
 	defer loader.Close()
 
 	// No session registered. Run a workload in a fresh cgroup anyway.
@@ -239,18 +246,12 @@ func TestKernelHarness_OutOfSessionSilence(t *testing.T) {
 func TestKernelHarness_ReattachIdempotent(t *testing.T) {
 	requireHarnessEnv(t)
 
-	l1, _, err := NewLoader(AttachOptions{})
-	if err != nil {
-		t.Fatalf("first NewLoader: %v", err)
-	}
+	l1, _ := mustNewLoader(t)
 	if err := l1.Close(); err != nil {
 		t.Fatalf("first Close: %v", err)
 	}
 
-	l2, gap, err := NewLoader(AttachOptions{})
-	if err != nil {
-		t.Fatalf("second NewLoader (reattach over pins): %v", err)
-	}
+	l2, gap := mustNewLoader(t)
 	defer l2.Close()
 	if gap == nil {
 		t.Error("second NewLoader reported no restart gap despite pins from the first (P5: the window between the two must be loud)")

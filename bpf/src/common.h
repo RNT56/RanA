@@ -19,6 +19,13 @@
 #include <bpf/bpf_endian.h> /* bpf_htons/bpf_ntohs for the cgroup_skb DNS hook */
 #include "records.h"
 
+/* rana_barrier_var: pin a variable's current value in its register so the
+ * compiler can neither reload it from (possibly-aliased) map memory nor
+ * reorder it across helper calls — the canonical libbpf `barrier_var`
+ * idiom. Used wherever a bounds-clamped value must SURVIVE to its use
+ * site for the verifier to accept the access (see rana_resolve_path). */
+#define rana_barrier_var(var) asm volatile("" : "+r"(var))
+
 #ifndef true
 #define true 1
 #define false 0
@@ -229,39 +236,55 @@ static __always_inline int rana_resolve_path(struct dentry *dentry, __u8 *out, i
 	}
 
 	/* Emit root-to-leaf: iterate comps[] in reverse, writing "/" + name
-	 * for each, bounded by out_cap. */
+	 * for each, bounded by out_cap.
+	 *
+	 * Verifier note (learned from a real 5.15 load rejection, "R2 invalid
+	 * mem access 'inv'"): comps lives in MAP memory, and `out` (ringbuf
+	 * or the same scratch map) may alias it as far as the compiler
+	 * knows — so after the bpf_probe_read_kernel call it is free to
+	 * RELOAD comps[i].len, replacing the carefully clamped register with
+	 * a fresh, unbounded map value; `off += clen` then loses its bounds
+	 * and the next byte store is unprovable. rana_barrier_var pins the
+	 * clamped value in its register (the canonical libbpf idiom), and
+	 * `off` is re-bounded at the top of every iteration so the verifier
+	 * re-learns the invariant regardless of what the previous iteration
+	 * did. */
 	int off = 0;
 	#pragma unroll
 	for (int i = RANA_MAX_PATH_COMPONENTS - 1; i >= 0; i--) {
 		if (i >= n)
 			continue;
-		if (off >= out_cap - 1)
+		if (off < 0 || off >= out_cap - 1)
 			break;
 		out[off] = '/';
 		off++;
 
 		__u32 clen = comps[i].len;
+		const unsigned char *name = comps[i].name;
+		rana_barrier_var(clen);
 		if (clen > 255)
-			clen = 255; /* NAME_MAX bound; guards the bpf_probe_read_kernel_str size */
+			clen = 255; /* NAME_MAX bound; guards the read size */
 
-		if (off >= out_cap - 1)
-			break;
 		long space = out_cap - off - 1;
 		if (space <= 0)
 			break;
 		if ((long)clen > space)
 			clen = (__u32)space;
+		rana_barrier_var(clen);
 
-		if (comps[i].name)
-			bpf_probe_read_kernel(out + off, clen, comps[i].name);
-		off += clen;
+		if (name && clen > 0) {
+			if (bpf_probe_read_kernel(out + off, clen, name) == 0)
+				off += clen;
+		}
 	}
 
+	if (off < 0)
+		off = 0;
 	if (off == 0 && out_cap > 0) {
 		out[0] = '/';
 		off = 1;
 	}
-	if (off < out_cap)
+	if (off > 0 && off < out_cap)
 		out[off] = 0;
 	return off;
 }

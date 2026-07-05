@@ -98,42 +98,44 @@ static __always_inline int rana_read_u16(struct rana_dns_cursor *c, __u16 *out)
  */
 static __always_inline int rana_parse_qname(struct rana_dns_cursor *c, __u8 *out, int cap)
 {
-    int out_off = 0;
-    #pragma unroll
-    for (int i = 0; i < RANA_DNS_MAX_NAME_WALK; i++) {
-        __u8 label_len;
-        if (rana_read_u8(c, &label_len) < 0)
-            return -1;
-        if (label_len == 0)
-            break; /* root label: end of name */
-        if (label_len & 0xC0)
-            return -1; /* compression pointer: not followed, see above */
-        if (label_len > RANA_DNS_MAX_LABEL)
-            return -1;
+	/* Deliberately NOT unrolled: the fully-unrolled form (128 outer x 63
+	 * inner reads) blew the verifier's 1M-instruction processing budget.
+	 * Bounded loops verify natively since 5.3 (well inside the 5.15
+	 * floor) and state pruning keeps the cost tiny. Each label is copied
+	 * with ONE bpf_skb_load_bytes of label_len bytes (verifier-bounded
+	 * [1,63]) instead of byte-at-a-time, so the loop body is a handful
+	 * of instructions. */
+	int out_off = 0;
+	for (int i = 0; i < RANA_DNS_MAX_NAME_WALK; i++) {
+		__u8 label_len;
+		if (rana_read_u8(c, &label_len) < 0)
+			return -1;
+		if (label_len == 0)
+			break; /* root label: end of name */
+		if (label_len & 0xC0)
+			return -1; /* compression pointer: not followed, see above */
+		if (label_len > RANA_DNS_MAX_LABEL)
+			return -1;
 
-        if (out_off > 0) {
-            if (out_off >= cap - 1)
-                break;
-            out[out_off] = '.';
-            out_off++;
-        }
+		/* '.' plus a max-size label must provably fit (constant
+		 * compare; cap is a constant at the single call site). */
+		if (out_off < 0 || out_off > cap - RANA_DNS_MAX_LABEL - 2)
+			break;
+		if (out_off > 0) {
+			out[out_off] = '.';
+			out_off++;
+		}
 
-        #pragma unroll
-        for (int j = 0; j < RANA_DNS_MAX_LABEL; j++) {
-            if (j >= label_len)
-                break;
-            __u8 ch;
-            if (rana_read_u8(c, &ch) < 0)
-                return -1;
-            if (out_off < cap - 1) {
-                out[out_off] = ch;
-                out_off++;
-            }
-        }
-    }
-    if (out_off < cap)
-        out[out_off] = 0;
-    return out_off;
+		if (bpf_skb_load_bytes(c->skb, c->off, out + out_off, label_len) < 0)
+			return -1;
+		c->off += label_len;
+		out_off += label_len;
+	}
+	if (out_off < 0)
+		out_off = 0;
+	if (out_off < cap)
+		out[out_off] = 0;
+	return out_off;
 }
 
 static __always_inline void rana_v4_mapped_dns(const __u8 addr[4], __u8 out[16])
@@ -277,20 +279,16 @@ int rana_dns_egress(struct __sk_buff *skb)
 
 		if (rtype == 1 && rdlength == 4) { /* A record */
 			__u8 addr[4];
-			#pragma unroll
-			for (int k = 0; k < 4; k++) {
-				if (rana_read_u8(&cur, &addr[k]) < 0)
-					goto done;
-			}
+			if (bpf_skb_load_bytes(cur.skb, cur.off, addr, 4) < 0)
+				goto done;
+			cur.off += 4;
 			rana_v4_mapped_dns(addr, rec->answers[n]);
 			n++;
 			rec->ttl = rttl;
 		} else if (rtype == 28 && rdlength == 16) { /* AAAA record */
-			#pragma unroll
-			for (int k = 0; k < 16; k++) {
-				if (rana_read_u8(&cur, &rec->answers[n][k]) < 0)
-					goto done;
-			}
+			if (bpf_skb_load_bytes(cur.skb, cur.off, rec->answers[n], 16) < 0)
+				goto done;
+			cur.off += 16;
 			n++;
 			rec->ttl = rttl;
 		} else {

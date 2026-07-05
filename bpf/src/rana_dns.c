@@ -61,21 +61,27 @@ struct rana_dns_cursor {
  * fields (never TXT/MX/other rdata, per the file header). */
 static __always_inline int rana_read_u8(struct rana_dns_cursor *c, __u8 *out)
 {
-	if (c->data + c->off + 1 > c->data_end)
+	/* Check and dereference the SAME derived pointer: the verifier's
+	 * packet range attaches to the register the compare ran on, so
+	 * re-deriving data+off after the branch (as a naive two-expression
+	 * form compiles to) yields a fresh pointer with range 0 — a real
+	 * 5.15 verifier rejected exactly that ("R1 offset is outside of
+	 * the packet"). */
+	__u8 *p = (__u8 *)c->data + c->off;
+	if ((void *)(p + 1) > c->data_end)
 		return -1;
-	*out = *(__u8 *)(c->data + c->off);
+	*out = *p;
 	c->off += 1;
 	return 0;
 }
 
 static __always_inline int rana_read_u16(struct rana_dns_cursor *c, __u16 *out)
 {
-	if (c->data + c->off + 2 > c->data_end)
+	/* Same single-pointer-lineage rule as rana_read_u8. */
+	__u8 *p = (__u8 *)c->data + c->off;
+	if ((void *)(p + 2) > c->data_end)
 		return -1;
-	__u8 hi, lo;
-	hi = *(__u8 *)(c->data + c->off);
-	lo = *(__u8 *)(c->data + c->off + 1);
-	*out = ((__u16)hi << 8) | lo;
+	*out = ((__u16)p[0] << 8) | p[1];
 	c->off += 2;
 	return 0;
 }

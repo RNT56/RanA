@@ -46,7 +46,16 @@ jobs:
       fail-fast: false
       matrix:
         # LTS floor (5.15) through current, plus bpf-next for early warning.
-        kernel: ["5.15-main", "6.1-main", "6.6-main", "bpf-next-main"]
+        # Date-pinned lvh-images tags (like every cilium consumer) — the
+        # moving "-main" tags break lvh v0.0.30's cached-pull name
+        # derivation ("invalid reference format"). Bump the date suffix
+        # deliberately; check quay.io/lvh-images/complexity-test for
+        # current snapshots.
+        kernel:
+          - "5.15-20260629.014609"
+          - "6.1-20260629.014609"
+          - "6.6-20260629.014609"
+          - "bpf-next-20260629.014609"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -63,27 +72,20 @@ jobs:
         id: prep
         run: |
           set -euo pipefail
-          if [ ! -d ./internal/bpf ]; then
-            echo "internal/bpf not present — nothing to run."; echo "ran=0" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          # Produce the embedded CO-RE objects (no-op if there are no
-          # //go:generate directives yet).
-          go generate ./internal/bpf || echo "go generate produced no output"
-          # Compile (do NOT run) the root+kernel harness into a binary the VM
-          # can execute. If no test carries the bpf_harness build tag yet,
-          # `go test -c` writes no binary — we skip rather than fail.
-          if go test -c -tags bpf_harness -o ./bpf-harness.test ./internal/bpf 2>/tmp/build.log; then
-            if [ -f ./bpf-harness.test ]; then
-              echo "harness binary built"; echo "ran=1" >> "$GITHUB_OUTPUT"
-            else
-              echo "no bpf_harness-tagged tests — skipping VM run"; echo "ran=0" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "harness compile failed:"; cat /tmp/build.log; exit 1
-          fi
+          # Produce the bpf2go CO-RE objects. A generation failure is a
+          # hard failure — a harness that silently skips generation would
+          # go green without testing anything (the hollow-gate trap).
+          go generate ./internal/bpf
+          # Compile (do NOT run) the root+kernel harness into a static
+          # binary the VM can execute. rana_bpf_generated unlocks the real
+          # NewLoader attach path; bpf_harness unlocks the kernel tests
+          # (internal/bpf/harness_linux_test.go). The binary MUST exist —
+          # this workflow's entire purpose is running it.
+          CGO_ENABLED=0 go test -c -tags "bpf_harness,rana_bpf_generated" \
+            -o ./bpf-harness.test ./internal/bpf
+          test -f ./bpf-harness.test || { echo "harness binary missing"; exit 1; }
 
       - name: boot ${{ matrix.kernel }} and run the harness as root
-        if: steps.prep.outputs.ran == '1'
         uses: cilium/little-vm-helper@v0.0.30
         with:
           test-name: rana-ebpf-${{ matrix.kernel }}

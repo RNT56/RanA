@@ -31,12 +31,121 @@ const bpffsRoot = "/sys/fs/bpf/rana"
 
 // Loader owns the lifetime of every attached CO-RE program and pinned
 // map for one ranad process. Zero value is not usable; construct via
-// NewLoader.
+// NewLoader (loader_attach.go — requires the rana_bpf_generated build
+// tag, i.e. `go generate ./internal/bpf` must have run).
 type Loader struct {
 	tier       Tier
 	links      []link.Link
 	reader     *ringbuf.Reader
 	prevPinned []string
+
+	// Shared maps, populated by NewLoader from the first-loaded object
+	// group and shared into every other group via MapReplacements (each
+	// group's ELF declares the same common.h maps; without replacement
+	// each load would create its own disjoint ringbuf/session set).
+	sessions     *ebpf.Map
+	sessionPids  *ebpf.Map
+	events       *ebpf.Map
+	sensPrefixes *ebpf.Map
+	sensInodes   *ebpf.Map
+
+	// closers holds the generated object groups' Close funcs (their
+	// Close detaches nothing — links do that — but releases program/map
+	// FDs; ebpf.Collection.Close returns no error, hence func()).
+	closers []func()
+
+	// lsmDegraded records why the optional lsm/socket_connect hook did
+	// not attach ("" when attached or not wanted at this tier). Optional
+	// coverage, not v1-completeness (loader_tier.go Features) — but the
+	// degradation must be loud (P5/P10), so it is surfaced, never
+	// swallowed.
+	lsmDegraded string
+}
+
+// Tier reports the kernel tier the loader attached at.
+func (l *Loader) Tier() Tier { return l.tier }
+
+// LSMDegraded reports why the optional lsm/socket_connect hook is not
+// active ("" when it is, or when the tier never wanted it). Callers
+// surface this in doctor/status output — never silently (P10).
+func (l *Loader) LSMDegraded() string { return l.lsmDegraded }
+
+// Events returns the ring buffer reader for rana_events. The caller owns
+// the read loop; Close on the Loader closes the reader (unblocking any
+// blocked Read).
+func (l *Loader) Events() *ringbuf.Reader { return l.reader }
+
+// RegisterSession marks cgid as a recorded session in the in-kernel
+// filter map (rana_sessions): from this moment the kernel emits events
+// for tasks in that cgroup. Idempotent.
+func (l *Loader) RegisterSession(cgid uint64) error {
+	var one uint8 = 1
+	if l.sessions == nil {
+		return errors.New("bpf: loader has no sessions map (not constructed via NewLoader)")
+	}
+	return l.sessions.Put(cgid, one)
+}
+
+// UnregisterSession removes cgid from the in-kernel filter map. Removing
+// a never-registered cgid is not an error (idempotent teardown).
+func (l *Loader) UnregisterSession(cgid uint64) error {
+	if l.sessions == nil {
+		return errors.New("bpf: loader has no sessions map (not constructed via NewLoader)")
+	}
+	if err := l.sessions.Delete(cgid); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+		return err
+	}
+	return nil
+}
+
+// sensitivePrefixKey mirrors bpf/src/common.h's
+// struct rana_sensitive_prefix_key exactly: 1 length byte + 256 prefix
+// bytes, no padding (257-byte key).
+type sensitivePrefixKey struct {
+	Len    uint8
+	Prefix [256]uint8
+}
+
+// AddSensitivePrefix registers a watchlisted path in the in-kernel D9
+// sensitive-read map. The path must be absolute and resolved; matching in
+// the kernel is an exact-length hash lookup against the resolved path
+// (bpf/src/rana_fs.c), so callers register each watched path at its
+// natural full length. Paths longer than 256 bytes are rejected (the
+// kernel-side key is fixed-size; such paths fall back to inode pinning).
+func (l *Loader) AddSensitivePrefix(path string, rule uint32) error {
+	if l.sensPrefixes == nil {
+		return errors.New("bpf: loader has no sensitive-prefix map (not constructed via NewLoader)")
+	}
+	if len(path) == 0 || len(path) > 256 {
+		return fmt.Errorf("bpf: sensitive prefix must be 1..256 bytes, got %d", len(path))
+	}
+	var key sensitivePrefixKey
+	key.Len = uint8(len(path))
+	copy(key.Prefix[:], path)
+	return l.sensPrefixes.Put(&key, rule)
+}
+
+// Close detaches every link, closes the ring buffer reader, and releases
+// the generated object groups. Pins under /sys/fs/bpf/rana are left in
+// place deliberately — they are the idempotent-reattach handshake for the
+// next ranad process (ReattachPlan); a clean uninstall removes them via
+// `rana doctor --cleanup` (out of this package's scope).
+func (l *Loader) Close() error {
+	var firstErr error
+	if l.reader != nil {
+		if err := l.reader.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	for _, lk := range l.links {
+		if err := lk.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	for _, c := range l.closers {
+		c()
+	}
+	return firstErr
 }
 
 // ErrBPFFSUnavailable is returned when /sys/fs/bpf is not mounted or not

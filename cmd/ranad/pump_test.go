@@ -146,6 +146,124 @@ func buildExitRecord(pid uint32, cgid uint64, tsMono, tsWall uint64, exitCode in
 	return buf
 }
 
+// fakeRegistrar records RegisterSession/UnregisterSession calls so a test
+// can assert the pump arms and disarms kernel capture for a session.
+type fakeRegistrar struct {
+	mu           sync.Mutex
+	registered   []uint64
+	unregistered []uint64
+	regErr       error
+}
+
+func (r *fakeRegistrar) RegisterSession(cgid uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.regErr != nil {
+		return r.regErr
+	}
+	r.registered = append(r.registered, cgid)
+	return nil
+}
+
+func (r *fakeRegistrar) UnregisterSession(cgid uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unregistered = append(r.unregistered, cgid)
+	return nil
+}
+
+func (r *fakeRegistrar) snapshot() (reg, unreg []uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]uint64(nil), r.registered...), append([]uint64(nil), r.unregistered...)
+}
+
+// TestPump_SessionStartRegistersCgid proves the full svc->ranad session
+// lifecycle over the wire: a SessionStart frame registers the cgid into the
+// (fake) kernel filter map and binds cgid->session in the enricher; a
+// subsequent SessionEnd unregisters it and unbinds. This is the seam that
+// turns `rana run`'s cgroup into live kernel capture.
+func TestPump_SessionStartRegistersCgid(t *testing.T) {
+	const (
+		cgid    = uint64(0xABCDEF01)
+		session = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	)
+	clk := &fakeClock{now: time.Unix(1700000000, 0)}
+	pipeline, err := redact.NewPipeline([]byte("test-salt-0123456789"))
+	if err != nil {
+		t.Fatalf("redact.NewPipeline: %v", err)
+	}
+	enricher := collector.NewEnricher(collector.EnricherConfig{
+		Pipeline: pipeline,
+		DNSCache: collector.NewDNSCache(clk),
+		Clock:    clk,
+	})
+	gov, err := collector.NewGovernor(collector.GovernorConfig{
+		Clock: clk, RatePerSec: 1_000_000, BurstSize: 1_000_000, ShedInterval: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewGovernor: %v", err)
+	}
+	reg := &fakeRegistrar{}
+	sink := &fakeSink{}
+	p := NewPump(PumpConfig{
+		Source: &fakeSource{}, Sink: sink, Enricher: enricher, Governor: gov,
+		Clock: clk, HeadsLogDir: t.TempDir(), Registrar: reg,
+	})
+
+	// Before SessionStart the cgid resolves to no session.
+	if s, ok := enricher.SessionForCgid(cgid); ok {
+		t.Fatalf("cgid bound to %q before SessionStart", s)
+	}
+
+	// Deliver SessionStart and pump the inbound channel.
+	sink.inbound = []wire.Frame{&wire.SessionStart{Session: session, Cgid: cgid}}
+	if _, err := p.PumpInbound(); err != nil {
+		t.Fatalf("PumpInbound(SessionStart): %v", err)
+	}
+	if regd, _ := reg.snapshot(); len(regd) != 1 || regd[0] != cgid {
+		t.Fatalf("registered = %v, want [%d]", regd, cgid)
+	}
+	if s, ok := enricher.SessionForCgid(cgid); !ok || s != session {
+		t.Fatalf("SessionForCgid(%d) = %q,%v, want %q,true", cgid, s, ok, session)
+	}
+
+	// Deliver SessionEnd and drain: the cgid must be unregistered + unbound.
+	sink.inbound = []wire.Frame{&wire.SessionEnd{Session: session}}
+	if _, err := p.PumpInbound(); err != nil {
+		t.Fatalf("PumpInbound(SessionEnd): %v", err)
+	}
+	p.DrainEndedSessions()
+	if _, unreg := reg.snapshot(); len(unreg) != 1 || unreg[0] != cgid {
+		t.Fatalf("unregistered = %v, want [%d]", unreg, cgid)
+	}
+	if s, ok := enricher.SessionForCgid(cgid); ok {
+		t.Fatalf("cgid still bound to %q after SessionEnd", s)
+	}
+}
+
+// TestPump_SessionStartRegisterErrorIsLoud proves a kernel registration
+// failure is surfaced (P5), not swallowed.
+func TestPump_SessionStartRegisterErrorIsLoud(t *testing.T) {
+	clk := &fakeClock{now: time.Unix(1700000000, 0)}
+	pipeline, _ := redact.NewPipeline([]byte("test-salt-0123456789"))
+	enricher := collector.NewEnricher(collector.EnricherConfig{
+		Pipeline: pipeline, DNSCache: collector.NewDNSCache(clk), Clock: clk,
+	})
+	gov, _ := collector.NewGovernor(collector.GovernorConfig{
+		Clock: clk, RatePerSec: 1_000_000, BurstSize: 1_000_000, ShedInterval: time.Second,
+	})
+	reg := &fakeRegistrar{regErr: errors.New("bpf map full")}
+	sink := &fakeSink{inbound: []wire.Frame{&wire.SessionStart{Session: "s", Cgid: 7}}}
+	p := NewPump(PumpConfig{
+		Source: &fakeSource{}, Sink: sink, Enricher: enricher, Governor: gov,
+		Clock: clk, HeadsLogDir: t.TempDir(), Registrar: reg,
+	})
+	if _, err := p.PumpInbound(); err == nil {
+		t.Fatal("PumpInbound returned nil, want the registration error surfaced")
+	}
+}
+
 // ---- newTestPump helper ----
 
 func newTestPump(t *testing.T, clk *fakeClock, cgid uint64, session string) (*Pump, *fakeSource, *fakeSink) {

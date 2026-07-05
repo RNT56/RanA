@@ -130,6 +130,19 @@ func (s *Service) EmitSessionStart(profileName redact.Redacted, argv []redact.Re
 	return s.appendAndPublish(ev)
 }
 
+// RegisterSessionCgid tells ranad which cgroup id belongs to this session,
+// so ranad's loader registers the cgid into the in-kernel filter map (which
+// starts eBPF event capture for that process tree) and binds cgid->session.
+// Callers invoke this the moment the session's cgroup scope exists (rana run
+// after CreateScope; rana adopt after locating the gateway's scope). It is
+// order-independent with ranad's connection: the RanadServer records the cgid
+// and replays it to any ranad that connects later. Safe to call before the
+// child process is placed in the cgroup — registration only arms the filter;
+// no events exist until a process actually runs there.
+func (s *Service) RegisterSessionCgid(cgid uint64) {
+	s.ranadServer.BroadcastSessionStart(s.cfg.Session, cgid)
+}
+
 // EmitSessionEnd appends a session.end event and forces a final seal
 // (docs/ARCHITECTURE.md §3: "End on scope-empty or `rana stop`;
 // session.end seals the final segment and writes a checkpoint").

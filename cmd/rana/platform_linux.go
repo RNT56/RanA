@@ -102,11 +102,19 @@ func runPlatform(p runParams) int {
 	// Create the session cgroup scope and exec the child inside it.
 	drv := &session.CgroupDriver{}
 	scopeName := session.ScopeName(sid)
-	if _, err := drv.CreateScope(ctx, scopeName); err != nil {
+	scope, err := drv.CreateScope(ctx, scopeName)
+	if err != nil {
 		fmt.Fprintf(p.Stderr, "rana run: creating session scope: %v\n  (RanA needs cgroup v2 write access; run `rana doctor`)\n", err)
 		return exitUsage
 	}
 	defer func() { _ = drv.DestroyScope(ctx, scopeName) }()
+
+	// Arm kernel capture: tell ranad which cgid belongs to this session so it
+	// registers the cgid into the eBPF filter map. Order-independent with
+	// ranad's connection (svc records the cgid and replays it to any ranad
+	// that connects later). Done BEFORE the child starts, so the child's very
+	// first exec is already inside a watched cgroup and nothing is missed.
+	svc.RegisterSessionCgid(scope.Cgid)
 
 	fmt.Fprintf(p.Stdout, "rana: recording session %s (profile %s)\n", sid, p.Profile.Name)
 

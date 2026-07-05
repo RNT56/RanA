@@ -8,7 +8,27 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 )
+
+// cgidOfDir returns the cgroup v2 id of the cgroup directory at path: its
+// inode number, which on cgroup v2 equals the kernel's kn->id (the value
+// rana_task_cgid / bpf_get_current_cgroup_id report), confirmed equal by
+// the multi-kernel harness. Returns an error if path cannot be stat'd or
+// the platform stat shape is unexpected — callers must not silently record
+// a 0 cgid, which would register "match every process not in a session"
+// into the filter map.
+func cgidOfDir(path string) (uint64, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("session: stat cgroup dir %s for cgid: %w", path, err)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, fmt.Errorf("session: stat of %s is %T, not *syscall.Stat_t", path, fi.Sys())
+	}
+	return uint64(st.Ino), nil
+}
 
 // cgroupRoot is the standard cgroup v2 mount point. It is a var (not a
 // const) so tests running on a real Linux host can point it at a tmpdir
@@ -80,7 +100,11 @@ func (d *CgroupDriver) CreateScope(ctx context.Context, name string) (Scope, err
 		return Scope{}, fmt.Errorf("session: create scope dir %s: %w", scope, err)
 	}
 
-	return Scope{Name: name}, nil
+	cgid, err := cgidOfDir(scope)
+	if err != nil {
+		return Scope{}, err
+	}
+	return Scope{Name: name, Cgid: cgid}, nil
 }
 
 // AddProcess implements Driver: writes pid to the scope's cgroup.procs,

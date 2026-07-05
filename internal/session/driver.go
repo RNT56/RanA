@@ -21,6 +21,13 @@ var ErrScopeNotFound = errors.New("session: scope not found")
 type Scope struct {
 	// Name is the session-scoped identifier, normally "rana-<sessionID>".
 	Name string
+	// Cgid is the cgroup v2 id of the created leaf: the kernel's kn->id,
+	// which on cgroup v2 equals the scope directory's inode number (the
+	// value bpf_get_current_cgroup_id / rana_task_cgid report in-kernel,
+	// confirmed equal by the multi-kernel harness). It is what svc hands
+	// ranad via wire.SessionStart to arm capture. 0 on platforms/drivers
+	// that do not resolve it (never Linux cgroupfs/systemd, which do).
+	Cgid uint64
 }
 
 // Driver abstracts the mechanism that places processes into a session's

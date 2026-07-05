@@ -266,3 +266,62 @@ func TestRanadServer_HeadReportCallbackWiredOnCheckpoint(t *testing.T) {
 		t.Fatal("timed out waiting for Head frame")
 	}
 }
+
+// TestRanadServer_SessionStartReplayOnConnect proves registration is
+// order-independent: a session started (BroadcastSessionStart) BEFORE ranad
+// connects is replayed to ranad the moment it registers, so a ranad that
+// connects — or reconnects after a restart — mid-session re-arms every live
+// cgid. This is the guarantee that makes the svc->ranad cgid handshake robust
+// to either side starting first.
+func TestRanadServer_SessionStartReplayOnConnect(t *testing.T) {
+	srv := NewRanadServer(RanadServerConfig{Appender: &fakeAppender{}})
+
+	// Session exists before any ranad is connected.
+	const session = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	const cgid = uint64(0xCAFEF00D)
+	srv.BroadcastSessionStart(session, cgid) // no conns yet: recorded in active
+
+	clientSide, serverSide := pairedConns()
+	defer clientSide.Close()
+	defer serverSide.Close()
+
+	// A continuous drain reader on the client side: it consumes every frame
+	// the server writes (replayed SessionStart, then SessionEnd) so no
+	// server-side write ever blocks on the synchronous net.Pipe.
+	frameCh := make(chan wire.Frame, 4)
+	go func() {
+		for {
+			f, err := wire.ReadFrame(clientSide)
+			if err != nil {
+				return
+			}
+			frameCh <- f
+		}
+	}()
+
+	// register() replays active sessions to the new connection; run it in a
+	// goroutine because the replay send blocks until the drain reader reads.
+	go func() { _ = srv.registerForTest(serverSide) }()
+
+	select {
+	case f := <-frameCh:
+		ss, ok := f.(*wire.SessionStart)
+		if !ok {
+			t.Fatalf("replayed frame is %T, want *wire.SessionStart", f)
+		}
+		if ss.Session != session || ss.Cgid != cgid {
+			t.Fatalf("replayed SessionStart = {%q,%d}, want {%q,%d}", ss.Session, ss.Cgid, session, cgid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for replayed SessionStart")
+	}
+
+	// After SessionEnd, active is cleared so a later connect gets no replay.
+	srv.BroadcastSessionEnd(session)
+	srv.mu.Lock()
+	_, stillActive := srv.active[session]
+	srv.mu.Unlock()
+	if stillActive {
+		t.Fatal("session still in active set after BroadcastSessionEnd")
+	}
+}

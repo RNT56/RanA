@@ -90,6 +90,14 @@ jobs:
           CGO_ENABLED=0 go test -c -tags "bpf_harness,rana_bpf_generated" \
             -o ./bpf-harness.test ./internal/bpf
           test -f ./bpf-harness.test || { echo "harness binary missing"; exit 1; }
+          # Prove the real daemon wiring compiles against the generated
+          # bindings: cmd/ranad's generated record source (bpf_source_
+          # generated_linux.go) drives bpf.NewLoader and exposes it as the
+          # pump's SessionRegistrar. Nothing else in CI builds this tag for
+          # cmd/ranad, so without this a drift between the daemon and the
+          # loader API would only surface at release time.
+          CGO_ENABLED=0 go build -tags rana_bpf_generated ./cmd/ranad
+          echo "cmd/ranad builds with generated eBPF bindings"
 
       - name: boot ${{ matrix.kernel }} and run the harness as root
         uses: cilium/little-vm-helper@v0.0.30

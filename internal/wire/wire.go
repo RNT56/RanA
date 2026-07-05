@@ -118,12 +118,32 @@ type Head struct {
 
 func (*Head) frameTag() string { return "head" }
 
+// SessionStart tells ranad that a recorded session exists and which cgroup
+// id (cgid) belongs to it, so ranad can (a) register the cgid into the
+// in-kernel session-filter map — the switch that makes the eBPF programs
+// begin emitting events for that cgroup's process tree (P6: in-kernel
+// filtering keeps non-session noise out of the ring buffer) — and (b) bind
+// cgid->session in its enricher so decoded records resolve to the right
+// session id. It travels the same svc->ranad reverse channel as Head and
+// SessionEnd, and carries only the session id (an opaque ULID) and the
+// cgid (a kernel cgroup inode number) — never any content. svc sends it
+// once the session's cgroup exists, and re-sends it to any ranad that
+// (re)connects afterward, so registration is order-independent.
+type SessionStart struct {
+	Session string // session id the cgid belongs to (opaque ULID)
+	Cgid    uint64 // cgroup v2 id (kn->id) of the session's scope leaf
+}
+
+func (*SessionStart) frameTag() string { return "session_start" }
+
 // SessionEnd tells ranad that a recorded session has ended (its cgroup scope
-// emptied, or `rana stop`), so ranad can evict that session's per-session
-// collector state (rate-governor buckets, segment tracker, exe-provenance
-// seen-map) — otherwise a long-lived ranad accumulates one such entry per
-// session it ever observed. It travels the same svc->ranad reverse channel as
-// Head. It carries only the session id (an opaque ULID), never any content.
+// emptied, or `rana stop`), so ranad can unregister the session's cgids from
+// the in-kernel filter map and evict that session's per-session collector
+// state (rate-governor buckets, segment tracker, exe-provenance seen-map) —
+// otherwise a long-lived ranad keeps emitting for a dead cgroup and
+// accumulates one state entry per session it ever observed. It travels the
+// same svc->ranad reverse channel as Head. It carries only the session id (an
+// opaque ULID), never any content.
 type SessionEnd struct {
 	Session string // session id whose collector state ranad should release
 }
@@ -163,16 +183,22 @@ type wireHead struct {
 
 type wireBye struct{}
 
+type wireSessionStart struct {
+	Session string `cbor:"session"`
+	Cgid    uint64 `cbor:"cgid"`
+}
+
 type wireSessionEnd struct {
 	Session string `cbor:"session"`
 }
 
 type wireEnvelope struct {
-	Hello      *wireHello      `cbor:"hello,omitempty"`
-	Ev         *wireEv         `cbor:"ev,omitempty"`
-	Head       *wireHead       `cbor:"head,omitempty"`
-	SessionEnd *wireSessionEnd `cbor:"session_end,omitempty"`
-	Bye        *wireBye        `cbor:"bye,omitempty"`
+	Hello        *wireHello        `cbor:"hello,omitempty"`
+	Ev           *wireEv           `cbor:"ev,omitempty"`
+	Head         *wireHead         `cbor:"head,omitempty"`
+	SessionStart *wireSessionStart `cbor:"session_start,omitempty"`
+	SessionEnd   *wireSessionEnd   `cbor:"session_end,omitempty"`
+	Bye          *wireBye          `cbor:"bye,omitempty"`
 }
 
 // WriteFrame encodes f as a length-prefixed canonical CBOR frame and writes
@@ -227,6 +253,8 @@ func toEnvelope(f Frame) (wireEnvelope, error) {
 			CkptHash:  ck,
 			At:        v.Report.At,
 		}}, nil
+	case *SessionStart:
+		return wireEnvelope{SessionStart: &wireSessionStart{Session: v.Session, Cgid: v.Cgid}}, nil
 	case *SessionEnd:
 		return wireEnvelope{SessionEnd: &wireSessionEnd{Session: v.Session}}, nil
 	case *Bye:
@@ -303,6 +331,10 @@ func fromEnvelope(env wireEnvelope) (Frame, error) {
 		copy(hd.Report.ChainHead[:], env.Head.ChainHead)
 		copy(hd.Report.CkptHash[:], env.Head.CkptHash)
 		f = &hd
+	}
+	if env.SessionStart != nil {
+		set++
+		f = &SessionStart{Session: env.SessionStart.Session, Cgid: env.SessionStart.Cgid}
 	}
 	if env.SessionEnd != nil {
 		set++

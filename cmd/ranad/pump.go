@@ -46,6 +46,19 @@ type RecordSource interface {
 	Next() (raw []byte, ok bool, err error)
 }
 
+// SessionRegistrar is the subset of the eBPF loader the pump needs to arm and
+// disarm kernel-side capture for a session: registering a cgid writes it into
+// the in-kernel filter map (the eBPF programs then emit events for that
+// cgroup's process tree, P6), and unregistering removes it. It is optional —
+// nil in tests and in an ungenerated build (no eBPF objects) — so the pump's
+// session bookkeeping runs identically with or without a live kernel behind
+// it. The real implementation is *bpf.Loader (RegisterSession/
+// UnregisterSession).
+type SessionRegistrar interface {
+	RegisterSession(cgid uint64) error
+	UnregisterSession(cgid uint64) error
+}
+
 // FrameSink sends frames to (and receives frames from) the svc unix socket.
 // Send/Recv are the only two operations the pump needs; connection setup
 // (Hello handshake, SO_PEERCRED check) happens once, outside this interface,
@@ -194,6 +207,11 @@ type PumpConfig struct {
 	// per-user deployment, so single-user behavior is unchanged. A system-wide
 	// root ranad supplies a MultiUserRouter (docs/MULTIUSER.md).
 	Router EventRouter
+	// Registrar arms/disarms kernel-side capture per session (writes the
+	// session's cgid into the eBPF filter map). Nil (tests, ungenerated
+	// builds) leaves the pump's session bookkeeping intact but performs no
+	// kernel registration.
+	Registrar SessionRegistrar
 }
 
 // Pump wires one RecordSource to one FrameSink through decode -> enrich ->
@@ -231,6 +249,15 @@ type Pump struct {
 	// that owns Sink.Send (never racing the inbound reader).
 	endedMu       sync.Mutex
 	endedSessions []string
+
+	// registrar arms/disarms kernel capture; regMu guards sessionCgid, the
+	// session->cgid map remembered from SessionStart so SessionEnd can
+	// unregister the exact cgid (both frames arrive on the inbound
+	// goroutine, but DrainEndedSessions reads the cgid from the outbound
+	// goroutine, so the map is mutex-guarded).
+	registrar   SessionRegistrar
+	regMu       sync.Mutex
+	sessionCgid map[string]uint64
 }
 
 // NewPump constructs a Pump from cfg.
@@ -255,6 +282,8 @@ func NewPump(cfg PumpConfig) *Pump {
 		dnsJoinWindow: window,
 		router:        router,
 		sessionUID:    make(map[string]uint32),
+		registrar:     cfg.Registrar,
+		sessionCgid:   make(map[string]uint64),
 	}
 }
 
@@ -559,6 +588,22 @@ func (p *Pump) DrainEndedSessions() []wire.Frame {
 				frames = append(frames, &wire.Ev{Event: body})
 			}
 		}
+		// Disarm kernel capture for this session's cgroup: unregister the
+		// cgid from the eBPF filter map so the programs stop emitting for a
+		// now-dead cgroup (whose id the kernel may recycle to an unrelated
+		// cgroup). Uses the cgid remembered from SessionStart; a session
+		// ended without a prior SessionStart (no cgid known) simply skips
+		// this, which is correct.
+		p.regMu.Lock()
+		cgid, hadCgid := p.sessionCgid[session]
+		delete(p.sessionCgid, session)
+		p.regMu.Unlock()
+		if hadCgid {
+			if p.registrar != nil {
+				_ = p.registrar.UnregisterSession(cgid) // best-effort: a failed unregister only leaves a dead cgid armed until ranad restart
+			}
+			p.enricher.UnbindCgid(cgid)
+		}
 		// Evict the remaining per-session state (safe map deletes). Order
 		// matters only in that the governor's final gap uses seg.Current
 		// above, so seg is evicted after.
@@ -612,10 +657,30 @@ func (p *Pump) PumpInbound() (int, error) {
 			return n, err
 		}
 		n++
+		if ss, ok := f.(*wire.SessionStart); ok {
+			// Arm kernel capture for this session's cgroup: register the
+			// cgid into the eBPF filter map (the programs begin emitting
+			// events for that tree) and bind cgid->session so decoded
+			// records resolve to the right session id. Idempotent — svc
+			// re-sends SessionStart on every ranad (re)connect, and both
+			// RegisterSession (map Put) and BindCgid tolerate repeats.
+			p.regMu.Lock()
+			p.sessionCgid[ss.Session] = ss.Cgid
+			p.regMu.Unlock()
+			if p.registrar != nil {
+				if err := p.registrar.RegisterSession(ss.Cgid); err != nil {
+					return n, fmt.Errorf("ranad: registering session cgid %d: %w", ss.Cgid, err)
+				}
+			}
+			p.enricher.BindCgid(ss.Cgid, ss.Session)
+			continue
+		}
 		if se, ok := f.(*wire.SessionEnd); ok {
 			// Queue for the outbound goroutine to act on (see endedSessions'
 			// doc comment): evicting the governor there lets its final gap be
-			// sent on the goroutine that owns Sink.Send.
+			// sent on the goroutine that owns Sink.Send. The kernel
+			// unregister + enricher unbind also happen there, using the cgid
+			// remembered from SessionStart.
 			p.endedMu.Lock()
 			p.endedSessions = append(p.endedSessions, se.Session)
 			p.endedMu.Unlock()

@@ -10,6 +10,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -100,7 +101,29 @@ func (d *SystemdDriver) CreateScope(ctx context.Context, name string) (Scope, er
 		return Scope{}, fmt.Errorf("session: StartTransientUnit %s: %w", unitName, err)
 	}
 
-	return Scope{Name: name}, nil
+	// StartTransientUnit is asynchronous: systemd creates the scope's
+	// cgroup dir (Root/rana.slice/<name>.scope) shortly after returning the
+	// job path. Resolve the cgid from that dir, retrying briefly for it to
+	// materialize. A 0 cgid must never be recorded (it would arm the filter
+	// map to match every unassigned process), so an unresolved cgid is a
+	// hard error rather than a silent zero.
+	cg := &CgroupDriver{Root: d.Root}
+	scopeDir := cg.scopePath(name)
+	var cgid uint64
+	for attempt := 0; attempt < 50; attempt++ {
+		if id, err := cgidOfDir(scopeDir); err == nil {
+			cgid = id
+			break
+		}
+		if ctx.Err() != nil {
+			return Scope{}, ctx.Err()
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cgid == 0 {
+		return Scope{}, fmt.Errorf("session: scope %s created but its cgroup dir %s did not appear (cannot resolve cgid)", unitName, scopeDir)
+	}
+	return Scope{Name: name, Cgid: cgid}, nil
 }
 
 // isUnitExistsError reports whether a D-Bus error from StartTransientUnit

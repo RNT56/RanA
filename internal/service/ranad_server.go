@@ -69,6 +69,12 @@ type RanadServer struct {
 
 	mu    sync.Mutex
 	conns map[*ranadConn]struct{}
+	// active holds session->cgid for every session whose cgroup exists
+	// but has not ended, so a ranad that (re)connects AFTER the session
+	// started is replayed the SessionStart it missed (registration must
+	// be order-independent: svc may learn the cgid before or after ranad
+	// connects, and ranad may restart mid-session). Guarded by mu.
+	active map[string]uint64
 }
 
 // NewRanadServer constructs a RanadServer. Binding a listener socket is the
@@ -77,7 +83,11 @@ type RanadServer struct {
 // connection at a time via HandleConn, so it is testable without any
 // socket at all (net.Pipe suffices, see ranad_server_test.go).
 func NewRanadServer(cfg RanadServerConfig) *RanadServer {
-	return &RanadServer{cfg: cfg, conns: make(map[*ranadConn]struct{})}
+	return &RanadServer{
+		cfg:    cfg,
+		conns:  make(map[*ranadConn]struct{}),
+		active: make(map[string]uint64),
+	}
 }
 
 // ranadConn wraps one accepted connection so SendHead can be targeted at
@@ -96,6 +106,16 @@ func (c *ranadConn) SendHead(r chain.HeadReport) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return wire.WriteFrame(c.conn, &wire.Head{Report: toWireHeadReport(r)})
+}
+
+// SendSessionStart tells this connection's ranad peer that a session's cgroup
+// exists and carries its cgid, so ranad registers the cgid into the in-kernel
+// filter map (starting event capture for that tree) and binds cgid->session.
+// Same reverse channel as SendHead; carries only the session id and cgid.
+func (c *ranadConn) SendSessionStart(session string, cgid uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return wire.WriteFrame(c.conn, &wire.SessionStart{Session: session, Cgid: cgid})
 }
 
 // SendSessionEnd tells this connection's ranad peer that a session has ended,
@@ -131,7 +151,20 @@ func (s *RanadServer) register(conn net.Conn) *ranadConn {
 	rc := &ranadConn{conn: conn}
 	s.mu.Lock()
 	s.conns[rc] = struct{}{}
+	// Snapshot active sessions to replay after releasing the lock (SendX
+	// does socket I/O; never hold s.mu across it).
+	replay := make(map[string]uint64, len(s.active))
+	for sess, cgid := range s.active {
+		replay[sess] = cgid
+	}
 	s.mu.Unlock()
+	// Replay every in-flight session's registration to the freshly
+	// connected ranad, so a ranad that connects (or reconnects after a
+	// restart) mid-session re-registers every live cgid into the kernel
+	// filter map and resumes capture.
+	for sess, cgid := range replay {
+		_ = rc.SendSessionStart(sess, cgid)
+	}
 	return rc
 }
 
@@ -157,13 +190,36 @@ func (s *RanadServer) Broadcast(r chain.HeadReport) {
 	}
 }
 
+// BroadcastSessionStart records session->cgid as active and tells every
+// registered ranad connection to register the cgid into the in-kernel filter
+// map (beginning capture) and bind cgid->session. Recording it in `active`
+// makes the registration order-independent: a ranad that connects later is
+// replayed this SessionStart at register() time. Idempotent — re-broadcasting
+// the same (session, cgid) is harmless (ranad's RegisterSession is a map Put).
+func (s *RanadServer) BroadcastSessionStart(session string, cgid uint64) {
+	s.mu.Lock()
+	s.active[session] = cgid
+	conns := make([]*ranadConn, 0, len(s.conns))
+	for c := range s.conns {
+		conns = append(conns, c)
+	}
+	s.mu.Unlock()
+
+	for _, c := range conns {
+		_ = c.SendSessionStart(session, cgid)
+	}
+}
+
 // BroadcastSessionEnd tells every registered ranad connection that session has
-// ended so ranad evicts its per-session collector state. Best-effort: if ranad
-// is not connected, the state is released the next time ranad restarts (a
-// fresh ranad has no accumulated state) — nothing is lost by a dropped signal
-// except a bounded delay in reclaiming memory.
+// ended so ranad unregisters its cgids and evicts its per-session collector
+// state, and drops session from the active set so no future ranad reconnect
+// re-registers a dead cgroup. Best-effort: if ranad is not connected, the
+// state is released the next time ranad restarts (a fresh ranad has no
+// accumulated state) — nothing is lost by a dropped signal except a bounded
+// delay in reclaiming memory.
 func (s *RanadServer) BroadcastSessionEnd(session string) {
 	s.mu.Lock()
+	delete(s.active, session)
 	conns := make([]*ranadConn, 0, len(s.conns))
 	for c := range s.conns {
 		conns = append(conns, c)

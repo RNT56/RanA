@@ -102,7 +102,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	source, closeSource, err := newRecordSource()
+	source, registrar, closeSource, err := newRecordSource()
 	if err != nil {
 		return fmt.Errorf("ranad: record source: %w", err)
 	}
@@ -122,6 +122,7 @@ func run() error {
 	return daemonLoop(ctx, daemonLoopConfig{
 		SockPath:    sockPath,
 		Source:      source,
+		Registrar:   registrar,
 		Enricher:    enricher,
 		Governor:    governor,
 		Clock:       clock,
@@ -166,6 +167,7 @@ func loadOrCreateSalt(path string) ([]byte, error) {
 type daemonLoopConfig struct {
 	SockPath    string
 	Source      RecordSource
+	Registrar   SessionRegistrar // arms/disarms kernel capture per session; nil in an ungenerated build
 	Enricher    *collector.Enricher
 	Governor    *collector.Governor
 	Clock       collector.Clock
@@ -343,6 +345,7 @@ func serveConnection(ctx context.Context, conn *net.UnixConn, cfg daemonLoopConf
 		Governor:    cfg.Governor,
 		Clock:       cfg.Clock,
 		HeadsLogDir: cfg.HeadsLogDir,
+		Registrar:   cfg.Registrar,
 	})
 
 	// P5: every (re)connect is itself a gap, and it must be recorded, not

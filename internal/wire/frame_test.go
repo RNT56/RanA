@@ -389,6 +389,31 @@ func TestReadFrame_NonCanonicalUvarintRejected(t *testing.T) {
 	}
 }
 
+// TestWriteReadFrame_SessionStartRoundTrip covers the svc->ranad
+// session-start frame that registers a session's cgid into the kernel
+// filter map (arming capture).
+func TestWriteReadFrame_SessionStartRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	want := &SessionStart{Session: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Cgid: 0xDEADBEEF01}
+	if err := WriteFrame(&buf, want); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
+	got, err := ReadFrame(&buf)
+	if err != nil {
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	ss, ok := got.(*SessionStart)
+	if !ok {
+		t.Fatalf("frame type = %T, want *SessionStart", got)
+	}
+	if ss.Session != want.Session {
+		t.Errorf("Session = %q, want %q", ss.Session, want.Session)
+	}
+	if ss.Cgid != want.Cgid {
+		t.Errorf("Cgid = %d, want %d", ss.Cgid, want.Cgid)
+	}
+}
+
 // TestWriteReadFrame_SessionEndRoundTrip covers the svc->ranad session-end
 // signal frame (used to evict finished-session collector state).
 func TestWriteReadFrame_SessionEndRoundTrip(t *testing.T) {
